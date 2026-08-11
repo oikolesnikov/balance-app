@@ -1281,6 +1281,7 @@ if (tg) { tg.ready(); tg.expand(); }
                 } catch (e) {
                     state.loading = false;
                     state.error = e.message;
+                    alert('Ошибка сервера: ' + e.message);
                     if (CONFIG.DEMO_MODE) {
                         initDemoStorage();
                         state.user = { id: 'demo_user', first_name: 'Алекс', username: 'alex_demo' };
