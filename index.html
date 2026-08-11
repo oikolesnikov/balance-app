@@ -376,10 +376,17 @@
             // ==================== API ====================
             async function apiRequest(action, payload = {}) {
                 if (CONFIG.DEMO_MODE) return demoApiHandler(action, payload);
+                
+                // Проверка наличия initData
+                if (!tg || !tg.initData) {
+                    throw new Error('Telegram initData отсутствует. Откройте приложение через кнопку меню бота.');
+                }
+                
                 const headers = { 'Content-Type': 'application/json' };
+                // Передаём initData в теле запроса
                 const bodyPayload = {
                     action: action,
-                    payload: { ...payload, _initData: tg?.initData || '' }
+                    payload: { ...payload, _initData: tg.initData }
                 };
                 const controller = new AbortController();
                 const timeout = setTimeout(() => controller.abort(), 15000);
