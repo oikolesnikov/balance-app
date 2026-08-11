@@ -680,7 +680,10 @@ if (tg) { tg.ready(); tg.expand(); }
                 bindSettingsActions();
             }
             function renderSkeleton() { return '<div class="card"><div class="skeleton skeleton-block"></div><div class="skeleton skeleton-text"></div><div class="skeleton skeleton-text short"></div></div>'; }
-            function renderError() { return '<div class="error-banner" onclick="location.reload()">⚠️ Ошибка загрузки. Нажмите, чтобы повторить.</div>'; }
+           function renderError() {
+    const msg = state.error || 'Неизвестная ошибка';
+    return '<div class="error-banner" onclick="location.reload()">⚠️ ' + escapeHTML(msg) + '. Нажмите, чтобы повторить.</div>';
+}
             function renderDashboard() {
                 const stats = calcPeriodStats(state.selectedPeriod);
                 const balance = calcBalance();
