@@ -376,6 +376,8 @@
             // ==================== API ====================
             async function apiRequest(action, payload = {}) {
                 if (CONFIG.DEMO_MODE) return demoApiHandler(action, payload);
+                console.log('tg:', tg);
+                console.log('tg.initData:', tg?.initData);
                 const headers = { 'Content-Type': 'application/json' };
                 if (tg?.initData) headers['X-Telegram-Init-Data'] = tg.initData;
                 const controller = new AbortController();
