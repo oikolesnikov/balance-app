@@ -376,6 +376,7 @@
             // ==================== API ====================
             async function apiRequest(action, payload = {}) {
                 if (CONFIG.DEMO_MODE) return demoApiHandler(action, payload);
+                alert('initData: ' + (tg?.initData ? tg.initData.substring(0, 100) + '...' : 'ОТСУТСТВУЕТ'));
                 if (!tg || !tg.initData) {
                     throw new Error('Нет данных Telegram. initData отсутствует. Проверьте, открыто ли приложение через кнопку меню бота.');
                 }
