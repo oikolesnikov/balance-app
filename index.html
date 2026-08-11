@@ -230,14 +230,14 @@
                 MAX_DESC_LEN: 200,
             };
             // ==================== TELEGRAM ====================
-          const tg = window.Telegram?.WebApp;
-const isTelegram = !!(tg && tg.initDataUnsafe?.user);
-if (!isTelegram) {
-    CONFIG.DEMO_MODE = true;   // в браузере всегда демо
-} else {
-    CONFIG.DEMO_MODE = false;  // в Telegram – работа с сервером
-}
-if (tg) { tg.ready(); tg.expand(); }
+            const tg = window.Telegram?.WebApp;
+            const isTelegram = !!(tg && tg.initDataUnsafe?.user);
+            if (!isTelegram) {
+                CONFIG.DEMO_MODE = true;
+            } else {
+                CONFIG.DEMO_MODE = false;
+            }
+            if (tg) { tg.ready(); tg.expand(); }
             // ==================== STATE ====================
             const state = {
                 user: null,
@@ -678,10 +678,10 @@ if (tg) { tg.ready(); tg.expand(); }
                 bindSettingsActions();
             }
             function renderSkeleton() { return '<div class="card"><div class="skeleton skeleton-block"></div><div class="skeleton skeleton-text"></div><div class="skeleton skeleton-text short"></div></div>'; }
-           function renderError() {
-    const msg = state.error || 'Неизвестная ошибка';
-    return '<div class="error-banner" onclick="location.reload()">⚠️ ' + escapeHTML(msg) + '. Нажмите, чтобы повторить.</div>';
-}
+            function renderError() {
+                const msg = state.error || 'Неизвестная ошибка';
+                return '<div class="error-banner" onclick="location.reload()">⚠️ ' + escapeHTML(msg) + '. Нажмите, чтобы повторить.</div>';
+            }
             function renderDashboard() {
                 const stats = calcPeriodStats(state.selectedPeriod);
                 const balance = calcBalance();
@@ -1281,7 +1281,6 @@ if (tg) { tg.ready(); tg.expand(); }
                 } catch (e) {
                     state.loading = false;
                     state.error = e.message;
-                    alert('Ошибка сервера: ' + e.message);
                     if (CONFIG.DEMO_MODE) {
                         initDemoStorage();
                         state.user = { id: 'demo_user', first_name: 'Алекс', username: 'alex_demo' };
