@@ -205,7 +205,7 @@
             // ==================== CONFIG ====================
             const CONFIG = {
                 API_URL: 'https://adiqvgwbffcqxcmftfah.supabase.co/functions/v1/swift-function',
-                DEMO_MODE: true,
+                DEMO_MODE: false,
                 APP_NAME: 'Balance',
                 CURRENCY_SYMBOLS: { RUB: '₽' },
                 PERIODS: [
@@ -230,9 +230,13 @@
                 MAX_DESC_LEN: 200,
             };
             // ==================== TELEGRAM ====================
-            const tg = window.Telegram?.WebApp;
-            const isTelegram = !!(tg && tg.initDataUnsafe?.user);
-            if (!isTelegram) CONFIG.DEMO_MODE = true;
+          const tg = window.Telegram?.WebApp;
+const isTelegram = !!(tg && tg.initDataUnsafe?.user);
+if (!isTelegram) {
+    CONFIG.DEMO_MODE = true;
+} else {
+    CONFIG.DEMO_MODE = false;
+}
             if (tg) { tg.ready(); tg.expand(); }
             // ==================== STATE ====================
             const state = {
