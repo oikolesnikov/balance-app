@@ -383,12 +383,20 @@
                 try {
                     const resp = await fetch(CONFIG.API_URL, { method: 'POST', headers, body: JSON.stringify({ action, payload }), signal: controller.signal });
                     clearTimeout(timeout);
-                    const json = await resp.json();          // читаем ответ ВСЕГДА
-if (!resp.ok) {
-    // сервер вернул { ok: false, error: { message: "..." } }
-    const serverMsg = json?.error?.message || json?.message || `HTTP ${resp.status}`;
-    throw new Error(serverMsg);
-}
+                    let json;
+                    try {
+                        json = await resp.json();
+                    } catch (e) {
+                        throw new Error(`HTTP ${resp.status} – ответ не JSON`);
+                    }
+                    if (!resp.ok) {
+                        const serverMsg = json?.error?.message || json?.message || `HTTP ${resp.status}`;
+                        throw new Error(serverMsg);
+                    }
+                    if (json.ok === false) {
+                        throw new Error(json.error?.message || 'API error');
+                    }
+                    return json.data;
                 } catch (e) {
                     clearTimeout(timeout);
                     if (e.name === 'AbortError') throw new Error('Таймаут запроса');
