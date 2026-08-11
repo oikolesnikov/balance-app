@@ -230,10 +230,16 @@
                 MAX_DESC_LEN: 200,
             };
             // ==================== TELEGRAM ====================
-            const tg = window.Telegram?.WebApp;
-            const isTelegram = !!(tg && tg.initDataUnsafe?.user);
-            CONFIG.DEMO_MODE = false;
-            if (tg) { tg.ready(); tg.expand(); }
+           const tg = window.Telegram?.WebApp;
+const isTelegram = !!(tg && tg.initDataUnsafe?.user);
+// ВРЕМЕННО ДЛЯ ТЕСТА
+CONFIG.DEMO_MODE = false;
+// if (!isTelegram) {
+//     CONFIG.DEMO_MODE = true;
+// } else {
+//     CONFIG.DEMO_MODE = false;
+// }
+if (tg) { tg.ready(); tg.expand(); }
             // ==================== STATE ====================
             const state = {
                 user: null,
