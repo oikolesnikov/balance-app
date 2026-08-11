@@ -205,7 +205,7 @@
             // ==================== CONFIG ====================
             const CONFIG = {
                 API_URL: 'https://adiqvgwbffcqxcmftfah.supabase.co/functions/v1/swift-function',
-                DEMO_MODE: false,
+                DEMO_MODE: true,
                 APP_NAME: 'Balance',
                 CURRENCY_SYMBOLS: { RUB: '₽' },
                 PERIODS: [
@@ -230,8 +230,13 @@
                 MAX_DESC_LEN: 200,
             };
             // ==================== TELEGRAM ====================
-          const tg = window.Telegram?.WebApp;
-CONFIG.DEMO_MODE = false;
+            const tg = window.Telegram?.WebApp;
+            const isTelegram = !!(tg && tg.initDataUnsafe?.user);
+            if (!isTelegram) {
+                CONFIG.DEMO_MODE = true;
+            } else {
+                CONFIG.DEMO_MODE = false;
+            }
             if (tg) { tg.ready(); tg.expand(); }
             // ==================== STATE ====================
             const state = {
@@ -944,9 +949,101 @@ CONFIG.DEMO_MODE = false;
             }
             function bindObligationActions() {
                 $$('[data-action="pay-credit"]').forEach(btn => {
-                    btn.onclick = function(e) { e.stopPropagation(); /* как раньше */ };
+                    btn.onclick = function(e) {
+                        e.stopPropagation();
+                        const creditId = this.dataset.creditId;
+                        const credit = state.credits.find(c => c.id === creditId);
+                        if (!credit || credit.status === 'closed') return;
+                        const actualPayment = Math.min(credit.payment_amount_minor, credit.remaining_amount_minor);
+                        openConfirm('Подтверждение', `Отметить платеж ${formatMoney(actualPayment)} по кредиту «${credit.name}» как выполненный?`, async () => {
+                            const btnEl = btn;
+                            btnEl.disabled = true; btnEl.textContent = '...';
+                            try {
+                                await apiRequest('mark_credit_payment_paid', {
+                                    credit_id: creditId,
+                                    idempotency_key: 'credit_' + creditId + '_' + nowISO() + '_' + Date.now(),
+                                    next_payment_date: addMonth(credit.next_payment_date),
+                                    category_id: state.categories.find(c => c.name === 'Кредиты' && c.type === 'expense')?.id,
+                                });
+                                if (tg?.HapticFeedback) tg.HapticFeedback.notificationOccurred('success');
+                                showToast('Платеж выполнен');
+                                renderAll();
+                            } catch (e) {
+                                showToast('Ошибка: ' + e.message, 'error');
+                                btnEl.disabled = false; btnEl.textContent = 'Платеж выполнен';
+                            }
+                        });
+                    };
                 });
-                // (аналогично остальные обработчики — они остались без изменений, но для краткости опущены, т.к. код уже большой; в реальном приложении они работают)
+                $$('[data-action="pay-recurring"]').forEach(btn => {
+                    btn.onclick = function(e) {
+                        e.stopPropagation();
+                        const recId = this.dataset.recId;
+                        const rec = state.recurringExpenses.find(r => r.id === recId);
+                        if (!rec || !rec.active) return;
+                        openConfirm('Подтверждение', `Отметить платеж ${formatMoney(rec.amount_minor)} по «${rec.name}» как оплаченный?`, async () => {
+                            const btnEl = btn;
+                            btnEl.disabled = true; btnEl.textContent = '...';
+                            try {
+                                await apiRequest('mark_recurring_expense_paid', {
+                                    recurring_expense_id: recId,
+                                    idempotency_key: 'rec_' + recId + '_' + nowISO() + '_' + Date.now(),
+                                    next_payment_date: addMonth(rec.next_payment_date || nowISO()),
+                                });
+                                if (tg?.HapticFeedback) tg.HapticFeedback.notificationOccurred('success');
+                                showToast('Оплачено');
+                                renderAll();
+                            } catch (e) {
+                                showToast('Ошибка: ' + e.message, 'error');
+                                btnEl.disabled = false; btnEl.textContent = 'Оплачено';
+                            }
+                        });
+                    };
+                });
+                $$('[data-action="edit-credit"]').forEach(btn => {
+                    btn.onclick = function(e) { e.stopPropagation(); openEditCreditSheet(this.dataset.creditId); };
+                });
+                $$('[data-action="delete-credit"]').forEach(btn => {
+                    btn.onclick = function(e) {
+                        e.stopPropagation();
+                        const creditId = this.dataset.creditId;
+                        const credit = state.credits.find(c => c.id === creditId);
+                        openConfirm('Удалить кредит', `Удалить кредит «${credit?.name}»?`, async () => {
+                            await apiRequest('delete_credit', { id: creditId });
+                            showToast('Кредит удален');
+                            renderAll();
+                        });
+                    };
+                });
+                $$('[data-action="edit-recurring"]').forEach(btn => {
+                    btn.onclick = function(e) { e.stopPropagation(); openEditRecurringSheet(this.dataset.recId); };
+                });
+                $$('[data-action="toggle-recurring"]').forEach(btn => {
+                    btn.onclick = function(e) {
+                        e.stopPropagation();
+                        const recId = this.dataset.recId;
+                        const rec = state.recurringExpenses.find(r => r.id === recId);
+                        apiRequest('update_recurring_expense', { id: recId, active: !rec?.active }).then(() => { renderAll(); });
+                    };
+                });
+                $$('[data-action="delete-recurring"]').forEach(btn => {
+                    btn.onclick = function(e) {
+                        e.stopPropagation();
+                        const recId = this.dataset.recId;
+                        const rec = state.recurringExpenses.find(r => r.id === recId);
+                        openConfirm('Удалить', `Удалить постоянный расход «${rec?.name}»?`, async () => {
+                            await apiRequest('delete_recurring_expense', { id: recId });
+                            showToast('Удалено');
+                            renderAll();
+                        });
+                    };
+                });
+                $$('[data-action="add-credit"]').forEach(btn => {
+                    btn.onclick = () => openAddCreditSheet();
+                });
+                $$('[data-action="add-recurring"]').forEach(btn => {
+                    btn.onclick = () => openAddRecurringSheet();
+                });
             }
             function bindSettingsActions() {
                 const addCatBtn = $('#addCatBtn');
@@ -992,10 +1089,175 @@ CONFIG.DEMO_MODE = false;
                     apiRequest('update_category', { id: catId, name, icon }).then(() => { showToast('Категория обновлена'); closeModal(); renderAll(); }).catch(e => { showToast('Ошибка', 'error'); unlock(); });
                 });
             }
-            // (остальные функции openAddTxSheet, openEditTxSheet, openAddCreditSheet, openEditCreditSheet, openAddRecurringSheet, openEditRecurringSheet остаются практически те же, только без стартового баланса)
+            function openAddTxSheet(type) {
+                const cats = state.categories.filter(c => c.type === type);
+                const title = type === 'income' ? 'Добавить доход' : 'Добавить расход';
+                const bodyHTML = `
+                <div class="input-group"><label>Сумма (₽)</label><input type="number" id="sheetAmount" step="0.01" min="0.01" placeholder="0,00" autofocus></div>
+                <div class="input-group"><label>Категория</label><select id="sheetCat">${cats.map(c=>`<option value="${c.id}">${c.icon} ${c.name}</option>`).join('')}</select></div>
+                <div class="input-group"><label>Описание</label><input type="text" id="sheetDesc" maxlength="${CONFIG.MAX_DESC_LEN}" placeholder="Описание"></div>
+                <div class="input-group"><label>Дата</label><input type="date" id="sheetDate" value="${nowISO()}"></div>`;
+                openSheet(title, bodyHTML, (unlock) => {
+                    const amount = parseFloat($('#sheetAmount').value.replace(',', '.'));
+                    if (isNaN(amount) || amount <= 0) { showToast('Введите сумму больше 0', 'error'); unlock(); return; }
+                    const data = {
+                        type,
+                        amount_minor: moneyToMinor(amount),
+                        category_id: $('#sheetCat').value,
+                        description: $('#sheetDesc').value.trim() || null,
+                        transaction_date: $('#sheetDate').value || nowISO(),
+                    };
+                    apiRequest('create_transaction', data).then(() => {
+                        showToast('Операция добавлена');
+                        if (tg?.HapticFeedback) tg.HapticFeedback.notificationOccurred('success');
+                        closeModal();
+                        renderAll();
+                    }).catch(e => { showToast('Ошибка: ' + e.message, 'error'); unlock(); });
+                });
+            }
+            function openEditTxSheet(tx) {
+                const cats = state.categories.filter(c => c.type === tx.type);
+                const bodyHTML = `
+                <div class="input-group"><label>Сумма (₽)</label><input type="number" id="sheetAmount" step="0.01" min="0.01" value="${minorToMoney(tx.amount_minor).toFixed(2)}"></div>
+                <div class="input-group"><label>Категория</label><select id="sheetCat">${cats.map(c=>`<option value="${c.id}" ${c.id===tx.category_id?'selected':''}>${c.icon} ${c.name}</option>`).join('')}</select></div>
+                <div class="input-group"><label>Описание</label><input type="text" id="sheetDesc" maxlength="${CONFIG.MAX_DESC_LEN}" value="${escapeHTML(tx.description||'')}"></div>
+                <div class="input-group"><label>Дата</label><input type="date" id="sheetDate" value="${tx.transaction_date||nowISO()}"></div>
+                <button class="btn btn-danger btn-sm" id="deleteTxBtn" style="margin-top:8px;width:100%">Удалить операцию</button>`;
+                openSheet('Редактировать операцию', bodyHTML, (unlock) => {
+                    const amount = parseFloat($('#sheetAmount').value.replace(',', '.'));
+                    if (isNaN(amount) || amount <= 0) { showToast('Введите сумму больше 0', 'error'); unlock(); return; }
+                    const data = {
+                        id: tx.id,
+                        amount_minor: moneyToMinor(amount),
+                        category_id: $('#sheetCat').value,
+                        description: $('#sheetDesc').value.trim() || null,
+                        transaction_date: $('#sheetDate').value || nowISO(),
+                    };
+                    apiRequest('update_transaction', data).then(() => {
+                        showToast('Операция обновлена');
+                        closeModal();
+                        renderAll();
+                    }).catch(e => { showToast('Ошибка: ' + e.message, 'error'); unlock(); });
+                });
+                setTimeout(() => {
+                    const delBtn = $('#deleteTxBtn');
+                    if (delBtn) delBtn.onclick = () => {
+                        closeModal();
+                        openConfirm('Удалить операцию', 'Вы уверены?', async () => {
+                            await apiRequest('delete_transaction', { id: tx.id });
+                            showToast('Операция удалена');
+                            renderAll();
+                        });
+                    };
+                }, 100);
+            }
+            function openAddCreditSheet() {
+                const bodyHTML = `
+                <div class="input-group"><label>Название</label><input type="text" id="sheetCredName" maxlength="${CONFIG.MAX_NAME_LEN}" placeholder="Например: Телефон"></div>
+                <div class="input-group"><label>Первоначальная сумма (₽)</label><input type="number" id="sheetCredInit" step="0.01" min="0.01" placeholder="0,00"></div>
+                <div class="input-group"><label>Остаток (₽)</label><input type="number" id="sheetCredRem" step="0.01" min="0.01" placeholder="0,00"></div>
+                <div class="input-group"><label>Сумма платежа (₽)</label><input type="number" id="sheetCredPay" step="0.01" min="0.01" placeholder="0,00"></div>
+                <div class="input-group"><label>Дата следующего платежа</label><input type="date" id="sheetCredDate" value="${addMonth(nowISO())}"></div>
+                <div class="input-group"><label>Заметка</label><input type="text" id="sheetCredNote" maxlength="200" placeholder="Опционально"></div>`;
+                openSheet('Добавить кредит', bodyHTML, (unlock) => {
+                    const name = $('#sheetCredName').value.trim();
+                    const init = parseFloat($('#sheetCredInit').value.replace(',', '.'));
+                    const rem = parseFloat($('#sheetCredRem').value.replace(',', '.'));
+                    const pay = parseFloat($('#sheetCredPay').value.replace(',', '.'));
+                    if (!name) { showToast('Введите название', 'error'); unlock(); return; }
+                    if (isNaN(init) || init <= 0 || isNaN(rem) || rem < 0 || isNaN(pay) || pay <= 0) { showToast('Проверьте суммы', 'error'); unlock(); return; }
+                    apiRequest('create_credit', {
+                        name,
+                        initial_amount_minor: moneyToMinor(init),
+                        remaining_amount_minor: moneyToMinor(rem),
+                        payment_amount_minor: moneyToMinor(pay),
+                        next_payment_date: $('#sheetCredDate').value || addMonth(nowISO()),
+                        note: $('#sheetCredNote').value.trim() || null,
+                        status: 'active',
+                    }).then(() => { showToast('Кредит добавлен'); closeModal(); renderAll(); }).catch(e => { showToast('Ошибка: ' + e.message, 'error'); unlock(); });
+                });
+            }
+            function openEditCreditSheet(creditId) {
+                const c = state.credits.find(x => x.id === creditId);
+                if (!c) return;
+                const bodyHTML = `
+                <div class="input-group"><label>Название</label><input type="text" id="sheetCredName" maxlength="${CONFIG.MAX_NAME_LEN}" value="${escapeHTML(c.name)}"></div>
+                <div class="input-group"><label>Первоначальная сумма (₽)</label><input type="number" id="sheetCredInit" step="0.01" min="0.01" value="${minorToMoney(c.initial_amount_minor).toFixed(2)}"></div>
+                <div class="input-group"><label>Остаток (₽)</label><input type="number" id="sheetCredRem" step="0.01" min="0" value="${minorToMoney(c.remaining_amount_minor).toFixed(2)}"></div>
+                <div class="input-group"><label>Сумма платежа (₽)</label><input type="number" id="sheetCredPay" step="0.01" min="0.01" value="${minorToMoney(c.payment_amount_minor).toFixed(2)}"></div>
+                <div class="input-group"><label>Дата следующего платежа</label><input type="date" id="sheetCredDate" value="${c.next_payment_date||''}"></div>
+                <div class="input-group"><label>Заметка</label><input type="text" id="sheetCredNote" maxlength="200" value="${escapeHTML(c.note||'')}"></div>`;
+                openSheet('Редактировать кредит', bodyHTML, (unlock) => {
+                    const name = $('#sheetCredName').value.trim();
+                    const rem = parseFloat($('#sheetCredRem').value.replace(',', '.'));
+                    if (!name) { showToast('Введите название', 'error'); unlock(); return; }
+                    if (isNaN(rem) || rem < 0) { showToast('Проверьте остаток', 'error'); unlock(); return; }
+                    const newStatus = rem <= 0 ? 'closed' : c.status;
+                    apiRequest('update_credit', {
+                        id: creditId,
+                        name,
+                        initial_amount_minor: moneyToMinor(parseFloat($('#sheetCredInit').value.replace(',', '.')) || 0),
+                        remaining_amount_minor: moneyToMinor(rem),
+                        payment_amount_minor: moneyToMinor(parseFloat($('#sheetCredPay').value.replace(',', '.')) || 0),
+                        next_payment_date: $('#sheetCredDate').value || null,
+                        note: $('#sheetCredNote').value.trim() || null,
+                        status: newStatus,
+                    }).then(() => { showToast('Кредит обновлен'); closeModal(); renderAll(); }).catch(e => { showToast('Ошибка: ' + e.message, 'error'); unlock(); });
+                });
+            }
+            function openAddRecurringSheet() {
+                const expCats = state.categories.filter(c => c.type === 'expense');
+                const bodyHTML = `
+                <div class="input-group"><label>Название</label><input type="text" id="sheetRecName" maxlength="${CONFIG.MAX_NAME_LEN}" placeholder="Например: Аренда"></div>
+                <div class="input-group"><label>Сумма (₽)</label><input type="number" id="sheetRecAmt" step="0.01" min="0.01" placeholder="0,00"></div>
+                <div class="input-group"><label>Категория</label><select id="sheetRecCat">${expCats.map(c=>`<option value="${c.id}">${c.icon} ${c.name}</option>`).join('')}</select></div>
+                <div class="input-group"><label>Дата следующего платежа</label><input type="date" id="sheetRecDate" value="${addMonth(nowISO())}"></div>
+                <div class="input-group"><label>Заметка</label><input type="text" id="sheetRecNote" maxlength="200" placeholder="Опционально"></div>`;
+                openSheet('Добавить постоянный расход', bodyHTML, (unlock) => {
+                    const name = $('#sheetRecName').value.trim();
+                    const amt = parseFloat($('#sheetRecAmt').value.replace(',', '.'));
+                    if (!name) { showToast('Введите название', 'error'); unlock(); return; }
+                    if (isNaN(amt) || amt <= 0) { showToast('Введите сумму', 'error'); unlock(); return; }
+                    apiRequest('create_recurring_expense', {
+                        name,
+                        amount_minor: moneyToMinor(amt),
+                        category_id: $('#sheetRecCat').value,
+                        next_payment_date: $('#sheetRecDate').value || addMonth(nowISO()),
+                        recurrence: 'monthly',
+                        active: true,
+                        note: $('#sheetRecNote').value.trim() || null,
+                    }).then(() => { showToast('Постоянный расход добавлен'); closeModal(); renderAll(); }).catch(e => { showToast('Ошибка: ' + e.message, 'error'); unlock(); });
+                });
+            }
+            function openEditRecurringSheet(recId) {
+                const r = state.recurringExpenses.find(x => x.id === recId);
+                if (!r) return;
+                const expCats = state.categories.filter(c => c.type === 'expense');
+                const bodyHTML = `
+                <div class="input-group"><label>Название</label><input type="text" id="sheetRecName" maxlength="${CONFIG.MAX_NAME_LEN}" value="${escapeHTML(r.name)}"></div>
+                <div class="input-group"><label>Сумма (₽)</label><input type="number" id="sheetRecAmt" step="0.01" min="0.01" value="${minorToMoney(r.amount_minor).toFixed(2)}"></div>
+                <div class="input-group"><label>Категория</label><select id="sheetRecCat">${expCats.map(c=>`<option value="${c.id}" ${c.id===r.category_id?'selected':''}>${c.icon} ${c.name}</option>`).join('')}</select></div>
+                <div class="input-group"><label>Дата следующего платежа</label><input type="date" id="sheetRecDate" value="${r.next_payment_date||''}"></div>
+                <div class="input-group"><label>Заметка</label><input type="text" id="sheetRecNote" maxlength="200" value="${escapeHTML(r.note||'')}"></div>`;
+                openSheet('Редактировать постоянный расход', bodyHTML, (unlock) => {
+                    const name = $('#sheetRecName').value.trim();
+                    const amt = parseFloat($('#sheetRecAmt').value.replace(',', '.'));
+                    if (!name) { showToast('Введите название', 'error'); unlock(); return; }
+                    if (isNaN(amt) || amt <= 0) { showToast('Введите сумму', 'error'); unlock(); return; }
+                    apiRequest('update_recurring_expense', {
+                        id: recId,
+                        name,
+                        amount_minor: moneyToMinor(amt),
+                        category_id: $('#sheetRecCat').value,
+                        next_payment_date: $('#sheetRecDate').value || null,
+                        note: $('#sheetRecNote').value.trim() || null,
+                    }).then(() => { showToast('Обновлено'); closeModal(); renderAll(); }).catch(e => { showToast('Ошибка: ' + e.message, 'error'); unlock(); });
+                });
+            }
             // ==================== INIT ====================
             async function bootstrap() {
-                state.loading = true; renderAll();
+                state.loading = true;
+                renderAll();
                 try {
                     if (CONFIG.DEMO_MODE) {
                         initDemoStorage();
@@ -1011,10 +1273,16 @@ CONFIG.DEMO_MODE = false;
                         state.recurringPayments = data.recurringPayments || [];
                         state.categories = data.categories || [];
                     }
-                    state.loading = false; state.error = null;
+                    state.loading = false;
+                    state.error = null;
                 } catch (e) {
-                    state.loading = false; state.error = e.message;
-                    if (CONFIG.DEMO_MODE) { initDemoStorage(); state.user = { id: 'demo_user', first_name: 'Алекс', username: 'alex_demo' }; state.error = null; state.loading = false; }
+                    state.loading = false;
+                    state.error = e.message;
+                    if (CONFIG.DEMO_MODE) {
+                        initDemoStorage();
+                        state.user = { id: 'demo_user', first_name: 'Алекс', username: 'alex_demo' };
+                        state.error = null; state.loading = false;
+                    }
                 }
                 renderAll();
                 if (CONFIG.DEMO_MODE) runSelfTests();
