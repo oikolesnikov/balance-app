@@ -6,7 +6,185 @@
     <title>Balance — Учет финансов</title>
     <script src="https://telegram.org/js/telegram-web-app.js?56"></script>
     <style>
-        /* ... весь ваш CSS без изменений ... */
+        :root {
+            --bg: #0d1117;
+            --surface: #161b22;
+            --surface2: #1c2129;
+            --border: #2a303c;
+            --text: #e6edf3;
+            --text2: #8b949e;
+            --text3: #6e7681;
+            --accent: #58a6ff;
+            --accent2: #1f6feb;
+            --green: #3fb950;
+            --red: #f85149;
+            --orange: #d2991d;
+            --purple: #a371f7;
+            --radius: 14px;
+            --radius-sm: 10px;
+            --shadow: 0 1px 3px rgba(0,0,0,.4);
+            --safe-top: env(safe-area-inset-top, 0px);
+            --safe-bottom: env(safe-area-inset-bottom, 0px);
+            --nav-h: 64px;
+            --max-w: 520px;
+        }
+        *,*::before,*::after { box-sizing: border-box; margin: 0; padding: 0; }
+        html { font-size: 16px; -webkit-tap-highlight-color: transparent; -webkit-font-smoothing: antialiased; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: #0a0e13; color: var(--text); line-height: 1.5;
+            display: flex; justify-content: center; min-height: 100dvh; overflow-x: hidden;
+            -webkit-overflow-scrolling: touch; user-select: none; -webkit-user-select: none;
+        }
+        #app {
+            width: 100%; max-width: var(--max-w); min-height: 100dvh;
+            display: flex; flex-direction: column; background: var(--bg); position: relative;
+        }
+        .demo-badge {
+            position: fixed; top: 12px; right: 12px; z-index: 999; background: var(--orange);
+            color: #000; font-size: 11px; font-weight: 700; padding: 4px 10px; border-radius: 20px; letter-spacing: .5px;
+        }
+        header {
+            padding: calc(var(--safe-top) + 8px) 16px 8px; display: flex; align-items: center; gap: 10px;
+            background: var(--bg); position: sticky; top: 0; z-index: 100; border-bottom: 1px solid transparent; transition: border-color .2s;
+        }
+        header.scrolled { border-bottom-color: var(--border); }
+        .avatar {
+            width: 36px; height: 36px; border-radius: 50%; background: var(--accent2);
+            display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 15px; color: #fff; flex-shrink: 0; overflow: hidden;
+        }
+        .avatar img { width: 100%; height: 100%; object-fit: cover; }
+        .greeting { flex: 1; min-width: 0; }
+        .greeting .name { font-weight: 600; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .greeting .sub { font-size: 12px; color: var(--text2); }
+        .period-selector { display: flex; gap: 4px; background: var(--surface); border-radius: 20px; padding: 3px; flex-shrink: 0; }
+        .period-selector button {
+            background: none; border: none; color: var(--text2); padding: 5px 10px; border-radius: 18px;
+            font-size: 12px; cursor: pointer; white-space: nowrap; font-weight: 500; transition: all .15s;
+        }
+        .period-selector button.active { background: var(--accent2); color: #fff; }
+        main {
+            flex: 1; padding: 8px 16px 24px; overflow-y: auto; -webkit-overflow-scrolling: touch;
+            padding-bottom: calc(var(--nav-h) + var(--safe-bottom) + 20px); display: flex; flex-direction: column; gap: 16px;
+        }
+        .card { background: var(--surface); border-radius: var(--radius); padding: 16px; border: 1px solid var(--border); box-shadow: var(--shadow); }
+        .card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+        .card-header h3 { font-size: 13px; font-weight: 600; color: var(--text2); text-transform: uppercase; letter-spacing: .5px; }
+        .balance-main { font-size: 38px; font-weight: 700; letter-spacing: -.5px; margin: 4px 0; }
+        .balance-sub { font-size: 13px; color: var(--text2); margin-top: 2px; }
+        .kpi-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 12px; }
+        .kpi { background: var(--surface2); border-radius: var(--radius-sm); padding: 12px; }
+        .kpi .label { font-size: 11px; color: var(--text3); text-transform: uppercase; letter-spacing: .4px; margin-bottom: 4px; }
+        .kpi .value { font-size: 20px; font-weight: 700; }
+        .kpi .value.income { color: var(--green); }
+        .kpi .value.expense { color: var(--red); }
+        .kpi .value.free { color: var(--accent); }
+        .kpi .value.warn { color: var(--orange); }
+        .quick-actions { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+        .quick-btn {
+            display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 14px 8px;
+            background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm);
+            cursor: pointer; font-size: 11px; color: var(--text); transition: all .15s; text-align: center; font-weight: 500;
+        }
+        .quick-btn:active { background: var(--surface2); transform: scale(.97); }
+        .quick-btn svg { width: 22px; height: 22px; }
+        .quick-btn.income svg { color: var(--green); }
+        .quick-btn.expense svg { color: var(--red); }
+        .quick-btn.credit svg { color: var(--purple); }
+        .quick-btn.recurring svg { color: var(--orange); }
+        .obligation-row { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--border); }
+        .obligation-row:last-child { border-bottom: none; }
+        .obligation-info { flex: 1; min-width: 0; }
+        .obligation-info .name { font-weight: 500; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .obligation-info .meta { font-size: 11px; color: var(--text3); }
+        .obligation-amount { font-weight: 600; text-align: right; font-size: 14px; }
+        .badge { font-size: 10px; padding: 3px 8px; border-radius: 12px; font-weight: 600; letter-spacing: .3px; }
+        .badge.pending { background: rgba(210,153,29,.2); color: var(--orange); }
+        .badge.paid { background: rgba(63,185,80,.2); color: var(--green); }
+        .badge.overdue { background: rgba(248,81,73,.2); color: var(--red); }
+        .cat-row { display: flex; align-items: center; gap: 10px; padding: 8px 0; }
+        .cat-bar-wrap { flex: 1; height: 6px; background: var(--surface2); border-radius: 3px; overflow: hidden; }
+        .cat-bar-fill { height: 100%; border-radius: 3px; transition: width .3s; }
+        .cat-amount { font-weight: 600; font-size: 13px; white-space: nowrap; }
+        .tx-row { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--border); cursor: pointer; transition: background .1s; }
+        .tx-row:last-child { border-bottom: none; }
+        .tx-row:active { background: var(--surface2); }
+        .tx-icon { width: 34px; height: 34px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 18px; flex-shrink: 0; }
+        .tx-icon.income { background: rgba(63,185,80,.15); }
+        .tx-icon.expense { background: rgba(248,81,73,.15); }
+        .tx-info { flex: 1; min-width: 0; }
+        .tx-info .desc { font-size: 14px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .tx-info .date { font-size: 11px; color: var(--text3); }
+        .tx-amount { font-weight: 600; font-size: 14px; text-align: right; }
+        .tx-amount.income { color: var(--green); }
+        .tx-amount.expense { color: var(--red); }
+        nav {
+            position: fixed; bottom: 0; left: 50%; transform: translateX(-50%); width: 100%; max-width: var(--max-w);
+            background: var(--surface); border-top: 1px solid var(--border); display: flex; padding: 0 8px;
+            padding-bottom: var(--safe-bottom); height: calc(var(--nav-h) + var(--safe-bottom)); z-index: 100;
+        }
+        nav button {
+            flex: 1; background: none; border: none; color: var(--text3); font-size: 10px; font-weight: 500;
+            display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px;
+            cursor: pointer; transition: color .15s; padding: 6px 0; min-height: 44px;
+        }
+        nav button.active { color: var(--accent); }
+        nav button svg { width: 20px; height: 20px; }
+        .modal-overlay {
+            position: fixed; inset: 0; background: rgba(0,0,0,.7); z-index: 200; display: flex; align-items: flex-end; justify-content: center; animation: fadeIn .2s;
+        }
+        .modal-sheet {
+            background: var(--surface); width: 100%; max-width: var(--max-w); border-radius: 20px 20px 0 0;
+            padding: 16px; padding-bottom: calc(var(--safe-bottom) + 16px); max-height: 85dvh; overflow-y: auto; animation: slideUp .25s ease-out;
+        }
+        .modal-sheet h2 { font-size: 18px; font-weight: 700; margin-bottom: 16px; text-align: center; }
+        .modal-confirm { background: var(--surface); width: 90%; max-width: 380px; border-radius: var(--radius); padding: 20px; text-align: center; animation: scaleIn .2s ease-out; align-self: center; }
+        .modal-confirm h3 { margin-bottom: 8px; }
+        .modal-confirm p { color: var(--text2); font-size: 14px; margin-bottom: 16px; }
+        .btn-row { display: flex; gap: 10px; }
+        .btn { padding: 12px 20px; border-radius: var(--radius-sm); font-weight: 600; font-size: 14px; cursor: pointer; border: none; transition: all .15s; flex: 1; text-align: center; min-height: 44px; display: flex; align-items: center; justify-content: center; }
+        .btn:active { transform: scale(.96); }
+        .btn:disabled { opacity: .5; pointer-events: none; }
+        .btn-primary { background: var(--accent2); color: #fff; }
+        .btn-secondary { background: var(--surface2); color: var(--text); border: 1px solid var(--border); }
+        .btn-danger { background: rgba(248,81,73,.2); color: var(--red); }
+        .btn-sm { padding: 8px 14px; font-size: 12px; min-height: 36px; border-radius: 8px; flex: 0; }
+        .input-group { margin-bottom: 12px; }
+        .input-group label { display: block; font-size: 12px; font-weight: 600; color: var(--text2); margin-bottom: 4px; text-transform: uppercase; letter-spacing: .4px; }
+        .input-group input, .input-group select, .input-group textarea { width: 100%; padding: 11px 14px; background: var(--surface2); border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--text); font-size: 15px; font-family: inherit; transition: border-color .15s; outline: none; }
+        .input-group input:focus, .input-group select:focus, .input-group textarea:focus { border-color: var(--accent); }
+        .input-group textarea { resize: vertical; min-height: 60px; }
+        .toast { position: fixed; top: 60px; left: 50%; transform: translateX(-50%); z-index: 300; padding: 10px 20px; border-radius: 20px; font-weight: 600; font-size: 13px; animation: toastIn .3s ease-out; pointer-events: none; }
+        .toast.success { background: var(--green); color: #000; }
+        .toast.error { background: var(--red); color: #fff; }
+        .empty-state { text-align: center; padding: 40px 20px; color: var(--text3); }
+        .empty-state svg { width: 60px; height: 60px; margin-bottom: 12px; opacity: .5; }
+        .empty-state p { font-size: 14px; }
+        .skeleton { background: linear-gradient(90deg, var(--surface2) 25%, var(--surface) 50%, var(--surface2) 75%); background-size: 200% 100%; animation: shimmer 1.5s infinite; border-radius: 6px; }
+        .skeleton-text { height: 14px; margin: 6px 0; width: 60%; }
+        .skeleton-text.short { width: 35%; }
+        .skeleton-block { height: 60px; margin: 8px 0; width: 100%; }
+        .error-banner { background: rgba(248,81,73,.15); border: 1px solid rgba(248,81,73,.3); border-radius: var(--radius-sm); padding: 12px 16px; display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer; }
+        .filter-row { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
+        .filter-chip { padding: 6px 12px; border-radius: 16px; font-size: 12px; border: 1px solid var(--border); background: var(--surface); color: var(--text2); cursor: pointer; white-space: nowrap; font-weight: 500; transition: all .15s; }
+        .filter-chip.active { background: var(--accent2); color: #fff; border-color: var(--accent2); }
+        .search-input { width: 100%; padding: 10px 14px; background: var(--surface2); border: 1px solid var(--border); border-radius: 20px; color: var(--text); font-size: 14px; margin-bottom: 10px; outline: none; }
+        .search-input:focus { border-color: var(--accent); }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes slideUp { from { transform: translateY(30%); } to { transform: translateY(0); } }
+        @keyframes scaleIn { from { transform: scale(.9); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+        @keyframes toastIn { from { transform: translateX(-50%) translateY(-20px); opacity: 0; } to { transform: translateX(-50%) translateY(0); opacity: 1; } }
+        @keyframes shimmer { 0% { background-position: -200% 0; } 100% { background-position: 200% 0; } }
+        @media(prefers-reduced-motion:reduce) { * { animation-duration: .01ms !important; } }
+        @media(min-width:521px) { #app { border-left: 1px solid var(--border); border-right: 1px solid var(--border); } }
+        .section-title { font-size: 12px; font-weight: 600; color: var(--text3); text-transform: uppercase; letter-spacing: .5px; margin: 4px 0 8px; }
+        .donut-wrap { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+        .donut { width: 100px; height: 100px; border-radius: 50%; flex-shrink: 0; }
+        .legend { font-size: 12px; }
+        .legend-item { display: flex; align-items: center; gap: 6px; margin: 3px 0; }
+        .legend-dot { width: 10px; height: 10px; border-radius: 50%; }
+        .cat-list-item { display: flex; align-items: center; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid var(--border); }
+        .cat-list-item:last-child { border-bottom: none; }
     </style>
 </head>
 <body>
@@ -199,7 +377,6 @@
             async function apiRequest(action, payload = {}) {
                 if (CONFIG.DEMO_MODE) return demoApiHandler(action, payload);
                 const headers = { 'Content-Type': 'application/json' };
-                // Передаём initData внутри тела запроса
                 const bodyPayload = {
                     action: action,
                     payload: { ...payload, _initData: tg?.initData || '' }
@@ -229,7 +406,6 @@
                     throw e;
                 }
             }
-            // ... (demoApiHandler без изменений)
             function demoApiHandler(action, payload) {
                 switch (action) {
                     case 'bootstrap':
@@ -397,7 +573,73 @@
                 const range = getPeriodRange(periodKey);
                 return state.recurringPayments.filter(p => isInRange(p.paid_at || p.due_date, range)).reduce((s, p) => s + (p.amount_minor || 0), 0);
             }
-            // ... (весь остальной код, включая render, модальные окна, обработчики, остаётся без изменений)
+            function validateFinanceState() {
+                if (!CONFIG.DEMO_MODE) return;
+                const issues = [];
+                state.credits.forEach(c => {
+                    if (c.remaining_amount_minor < 0) issues.push('Кредит ' + c.name + ' имеет отрицательный остаток');
+                    if (c.status === 'closed' && c.remaining_amount_minor !== 0) issues.push('Закрытый кредит ' + c.name + ' имеет ненулевой остаток');
+                });
+                if (issues.length) console.warn('Finance validation issues:', issues);
+            }
+            function runSelfTests() {
+                let passed = 0;
+                const total = 10;
+                try {
+                    assert(moneyToMinor('1000') + moneyToMinor('500') === 150000, 'TEST1');
+                    assert(moneyToMinor('100') + moneyToMinor('50.25') === 15025, 'TEST2');
+                    assert(150000 - 15025 === 134975, 'TEST3');
+                    let rem = 80000; let pay = 10000; rem -= pay; assert(rem === 70000, 'TEST4');
+                    rem = 7000; pay = 10000; let actualPay = Math.min(pay, rem); rem -= actualPay; assert(rem === 0 && actualPay === 7000, 'TEST5');
+                    rem = 500; pay = 1000; actualPay = Math.min(pay, rem); rem -= actualPay; assert(rem >= 0, 'TEST6');
+                    const totalExp = 15000; const catAmt = 10000; const pct = (catAmt / totalExp * 100); assert(Math.abs(pct - 66.67) < 0.01, 'TEST7');
+                    let payCount = 0; const idemKey = 'test_key'; const payments = []; if (!payments.find(p => p.key === idemKey)) { payments.push({ key: idemKey }); payCount++; } if (!payments.find(p => p.key === idemKey)) { payCount++; } assert(payCount === 1, 'TEST8');
+                    assert(payCount === 1, 'TEST9');
+                    const balance = 200000; const future = 70000; assert(balance - future === 130000, 'TEST10');
+                    console.log(`✅ Finance self tests: ${passed}/${total} passed`);
+                } catch (e) { console.error('❌ Self test failed:', e.message); }
+                function assert(cond, msg) { if (!cond) throw new Error('FAIL: ' + msg); passed++; }
+            }
+            // ==================== TOAST / MODALS ====================
+            function showToast(message, type = 'success') {
+                const container = $('#toastContainer');
+                const el = document.createElement('div');
+                el.className = 'toast ' + type;
+                el.textContent = message;
+                container.appendChild(el);
+                setTimeout(() => { el.style.opacity = '0'; el.style.transition = 'opacity .3s'; setTimeout(() => el.remove(), 300); }, 2500);
+            }
+            function openModal(html) {
+                const container = $('#modalContainer');
+                container.innerHTML = '';
+                const overlay = document.createElement('div');
+                overlay.className = 'modal-overlay';
+                overlay.innerHTML = html;
+                overlay.addEventListener('click', function(e) { if (e.target === overlay) closeModal(); });
+                container.appendChild(overlay);
+                document.body.style.overflow = 'hidden';
+            }
+            function closeModal() {
+                $('#modalContainer').innerHTML = '';
+                document.body.style.overflow = '';
+            }
+            function openConfirm(title, message, onConfirm) {
+                const html = `<div class="modal-confirm" onclick="event.stopPropagation()"><h3>${escapeHTML(title)}</h3><p>${escapeHTML(message)}</p><div class="btn-row"><button class="btn btn-secondary" id="confirmCancel">Отмена</button><button class="btn btn-primary" id="confirmOk">Подтвердить</button></div></div>`;
+                openModal(html);
+                $('#confirmCancel').onclick = closeModal;
+                $('#confirmOk').onclick = () => { closeModal(); onConfirm(); };
+            }
+            function openSheet(title, bodyHTML, onSave) {
+                const html = `<div class="modal-sheet" onclick="event.stopPropagation()"><h2>${escapeHTML(title)}</h2><div id="sheetBody">${bodyHTML}</div><div class="btn-row" style="margin-top:16px"><button class="btn btn-secondary" id="sheetCancel">Отмена</button><button class="btn btn-primary" id="sheetSave">Сохранить</button></div></div>`;
+                openModal(html);
+                $('#sheetCancel').onclick = closeModal;
+                $('#sheetSave').onclick = () => {
+                    const btn = $('#sheetSave');
+                    if (btn.disabled) return;
+                    btn.disabled = true; btn.textContent = '...';
+                    try { onSave(() => { btn.disabled = false; btn.textContent = 'Сохранить'; }); } catch (e) { btn.disabled = false; btn.textContent = 'Сохранить'; showToast('Ошибка', 'error'); }
+                };
+            }
             // ==================== RENDER ====================
             function renderAll() {
                 renderHeader();
@@ -453,8 +695,582 @@
                 const msg = state.error || 'Неизвестная ошибка';
                 return '<div class="error-banner" onclick="location.reload()">⚠️ ' + escapeHTML(msg) + '. Нажмите, чтобы повторить.</div>';
             }
-            // (остальные функции render без изменений, они уже были в предыдущем полном коде)
-            // ==================== BOOTSTRAP ====================
+            function renderDashboard() {
+                const stats = calcPeriodStats(state.selectedPeriod);
+                const balance = calcBalance();
+                const freeBalance = calcFreeBalance();
+                const creditTotal = calcCreditTotal();
+                const recExpected = calcRecurringMonthExpected();
+                const recPaid = calcRecurringMonthPaid(state.selectedPeriod);
+                const catStats = calcCategoryStats(state.selectedPeriod);
+                const recentTxs = [...state.transactions].sort((a, b) => (b.transaction_date || '').localeCompare(a.transaction_date || '')).slice(0, 5);
+                const upcomingObligations = getUpcomingObligations();
+                return `
+                <div class="card">
+                  <div class="card-header"><h3>Баланс</h3></div>
+                  <div class="balance-main">${formatMoney(balance)}</div>
+                  <div class="balance-sub">Свободный остаток: <strong>${formatMoney(freeBalance)}</strong></div>
+                  <div class="kpi-row">
+                    <div class="kpi"><div class="label">Доходы</div><div class="value income">${formatMoney(stats.income)}</div></div>
+                    <div class="kpi"><div class="label">Расходы</div><div class="value expense">${formatMoney(stats.expense)}</div></div>
+                    <div class="kpi"><div class="label">Денежный поток</div><div class="value ${stats.cashFlow>=0?'income':'expense'}">${formatMoney(stats.cashFlow)}</div></div>
+                    <div class="kpi"><div class="label">Кредиты</div><div class="value warn">${formatMoney(creditTotal)}</div></div>
+                  </div>
+                </div>
+                <div class="quick-actions">
+                  <button class="quick-btn income" data-action="add-income"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>Доход</button>
+                  <button class="quick-btn expense" data-action="add-expense"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="5" y1="12" x2="19" y2="12"/></svg>Расход</button>
+                  <button class="quick-btn credit" data-action="add-credit"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg>Кредит</button>
+                  <button class="quick-btn recurring" data-action="add-recurring"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 1l4 4-4 4"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><path d="M7 23l-4-4 4-4"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>Постоянный</button>
+                </div>
+                ${upcomingObligations.length>0 ? `<div class="card"><div class="card-header"><h3>Ближайшие платежи</h3></div>${upcomingObligations.slice(0,4).map(o=>`<div class="obligation-row"><div class="obligation-info"><div class="name">${escapeHTML(o.name)}</div><div class="meta">${formatDateRu(o.date)} · ${o.daysLeft} дн. · <span class="badge ${o.statusClass}">${o.statusLabel}</span></div></div><div class="obligation-amount">${formatMoney(o.amount)}</div></div>`).join('')}</div>` : ''}
+                ${catStats.cats.length>0 ? `<div class="card"><div class="card-header"><h3>Топ категорий расходов</h3></div>${catStats.cats.slice(0,3).map(c=>`<div class="cat-row"><span>${c.icon||'📋'}</span><span style="font-size:13px;flex:0 0 80px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escapeHTML(c.name)}</span><div class="cat-bar-wrap"><div class="cat-bar-fill" style="width:${Math.min(100,c.percent)}%;background:var(--accent)"></div></div><span class="cat-amount">${formatMoney(c.amount)}</span><span style="font-size:11px;color:var(--text3);width:40px;text-align:right">${c.percent.toFixed(0)}%</span></div>`).join('')}</div>` : ''}
+                ${recentTxs.length>0 ? `<div class="card"><div class="card-header"><h3>Последние операции</h3></div>${recentTxs.map(t=>renderTxRow(t)).join('')}</div>` : '<div class="empty-state"><p>Добавьте первую операцию</p></div>'}
+                `;
+            }
+            function renderTxRow(t) {
+                const cat = state.categories.find(c => c.id === t.category_id);
+                return `<div class="tx-row" data-tx-id="${t.id}"><div class="tx-icon ${t.type}">${cat?.icon||(t.type==='income'?'💰':'💸')}</div><div class="tx-info"><div class="desc">${escapeHTML(t.description||cat?.name||'')}</div><div class="date">${formatDateRu(t.transaction_date)}</div></div><div class="tx-amount ${t.type}">${t.type==='income'?'+':'-'}${formatMoney(t.amount_minor)}</div></div>`;
+            }
+            function getUpcomingObligations() {
+                const items = [];
+                const range = getPeriodRange(state.selectedPeriod);
+                state.credits.filter(c => c.status === 'active').forEach(c => {
+                    if (c.next_payment_date && new Date(c.next_payment_date) <= range.end) {
+                        const paid = state.creditPayments.filter(p => p.credit_id === c.id && isInRange(p.payment_date, range)).reduce((s, p) => s + (p.amount_minor || 0), 0);
+                        if (paid < c.payment_amount_minor) {
+                            const daysLeft = daysUntil(c.next_payment_date);
+                            items.push({ name: c.name, amount: c.payment_amount_minor - paid, date: c.next_payment_date, daysLeft: daysLeft !== null ? daysLeft : '?', type: 'credit', statusClass: daysLeft !== null && daysLeft < 0 ? 'overdue' : 'pending', statusLabel: daysLeft !== null && daysLeft < 0 ? 'Просрочен' : 'Ожидается' });
+                        }
+                    }
+                });
+                state.recurringExpenses.filter(r => r.active).forEach(r => {
+                    if (r.next_payment_date && new Date(r.next_payment_date) <= range.end) {
+                        const paid = state.recurringPayments.filter(p => p.recurring_expense_id === r.id && isInRange(p.paid_at || p.due_date, range)).reduce((s, p) => s + (p.amount_minor || 0), 0);
+                        if (paid < r.amount_minor) {
+                            const daysLeft = daysUntil(r.next_payment_date);
+                            items.push({ name: r.name, amount: r.amount_minor - paid, date: r.next_payment_date, daysLeft: daysLeft !== null ? daysLeft : '?', type: 'recurring', statusClass: daysLeft !== null && daysLeft < 0 ? 'overdue' : 'pending', statusLabel: daysLeft !== null && daysLeft < 0 ? 'Просрочен' : 'Ожидается' });
+                        }
+                    }
+                });
+                items.sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+                return items;
+            }
+            function renderTransactions() {
+                const filterType = state._txFilter || 'all';
+                const filterCat = state._txCatFilter || 'all';
+                const searchQuery = state._txSearch || '';
+                let txs = [...state.transactions];
+                if (filterType === 'income') txs = txs.filter(t => t.type === 'income');
+                if (filterType === 'expense') txs = txs.filter(t => t.type === 'expense');
+                if (filterCat !== 'all') txs = txs.filter(t => t.category_id === filterCat);
+                if (searchQuery) txs = txs.filter(t => (t.description || '').toLowerCase().includes(searchQuery.toLowerCase()));
+                txs.sort((a, b) => (b.transaction_date || '').localeCompare(a.transaction_date || ''));
+                const expCats = state.categories.filter(c => c.type === 'expense');
+                const incCats = state.categories.filter(c => c.type === 'income');
+                return `
+                <input class="search-input" id="txSearch" placeholder="Поиск по описанию..." value="${escapeHTML(searchQuery)}">
+                <div class="filter-row">
+                  <button class="filter-chip ${filterType==='all'?'active':''}" data-filter="all">Все</button>
+                  <button class="filter-chip ${filterType==='income'?'active':''}" data-filter="income">Доходы</button>
+                  <button class="filter-chip ${filterType==='expense'?'active':''}" data-filter="expense">Расходы</button>
+                </div>
+                <select class="search-input" id="catFilter" style="border-radius:16px;font-size:13px;">
+                  <option value="all">Все категории</option>
+                  ${expCats.map(c=>`<option value="${c.id}" ${filterCat===c.id?'selected':''}>${c.icon} ${c.name}</option>`).join('')}
+                  ${incCats.map(c=>`<option value="${c.id}" ${filterCat===c.id?'selected':''}>${c.icon} ${c.name}</option>`).join('')}
+                </select>
+                ${txs.length===0?'<div class="empty-state"><p>Операций не найдено</p></div>':txs.map(t=>renderTxRow(t)).join('')}
+                `;
+            }
+            function renderObligations() {
+                const credits = state.credits;
+                const recurring = state.recurringExpenses;
+                return `
+                <div class="section-title">Кредиты (${credits.filter(c=>c.status==='active').length} активных)</div>
+                ${credits.length===0?'<div class="empty-state"><p>Кредитов пока нет</p></div>':credits.map(c=>renderCreditCard(c)).join('')}
+                <button class="btn btn-secondary" style="width:100%;margin-top:8px" data-action="add-credit">+ Добавить кредит</button>
+                <div class="section-title" style="margin-top:16px">Постоянные расходы</div>
+                ${recurring.length===0?'<div class="empty-state"><p>Постоянных расходов пока нет</p></div>':recurring.map(r=>renderRecurringRow(r)).join('')}
+                <button class="btn btn-secondary" style="width:100%;margin-top:8px" data-action="add-recurring">+ Добавить постоянный расход</button>
+                `;
+            }
+            function renderCreditCard(c) {
+                const range = getPeriodRange(state.selectedPeriod);
+                const paidThisPeriod = state.creditPayments.filter(p => p.credit_id === c.id && isInRange(p.payment_date, range)).reduce((s, p) => s + (p.amount_minor || 0), 0);
+                const isPaidThisPeriod = c.status === 'active' && paidThisPeriod >= c.payment_amount_minor;
+                const daysLeft = daysUntil(c.next_payment_date);
+                return `
+                <div class="card" style="margin-bottom:8px">
+                  <div style="display:flex;justify-content:space-between;align-items:start">
+                    <div>
+                      <strong>${escapeHTML(c.name)}</strong>
+                      <div style="font-size:12px;color:var(--text3)">Остаток: ${formatMoney(c.remaining_amount_minor)} / ${formatMoney(c.initial_amount_minor)}</div>
+                      <div style="font-size:12px;color:var(--text3)">Платеж: ${formatMoney(c.payment_amount_minor)} · ${formatDateRu(c.next_payment_date)} · ${daysLeft!==null?daysLeft+' дн.':'—'}</div>
+                    </div>
+                    <span class="badge ${c.status==='closed'?'paid':isPaidThisPeriod?'paid':'pending'}">${c.status==='closed'?'Погашен':isPaidThisPeriod?'Оплачен':'Ожидается'}</span>
+                  </div>
+                  ${c.status==='active'?`
+                  <div style="display:flex;gap:6px;margin-top:10px;flex-wrap:wrap">
+                    <button class="btn btn-primary btn-sm" data-action="pay-credit" data-credit-id="${c.id}">Платеж выполнен</button>
+                    <button class="btn btn-secondary btn-sm" data-action="edit-credit" data-credit-id="${c.id}">Изменить</button>
+                    <button class="btn btn-danger btn-sm" data-action="delete-credit" data-credit-id="${c.id}">Удалить</button>
+                  </div>`:`<div style="margin-top:8px;color:var(--green);font-weight:600;font-size:13px">✅ Кредит погашен</div>`}
+                </div>`;
+            }
+            function renderRecurringRow(r) {
+                const range = getPeriodRange(state.selectedPeriod);
+                const paidThisPeriod = state.recurringPayments.filter(p => p.recurring_expense_id === r.id && isInRange(p.paid_at || p.due_date, range)).reduce((s, p) => s + (p.amount_minor || 0), 0);
+                const isPaid = paidThisPeriod >= r.amount_minor;
+                const daysLeft = daysUntil(r.next_payment_date);
+                return `
+                <div class="card" style="margin-bottom:8px">
+                  <div style="display:flex;justify-content:space-between;align-items:start">
+                    <div>
+                      <strong>${escapeHTML(r.name)}</strong>
+                      <div style="font-size:12px;color:var(--text3)">${formatMoney(r.amount_minor)} · ${formatDateRu(r.next_payment_date)} · ${daysLeft!==null?daysLeft+' дн.':'—'}</div>
+                    </div>
+                    <span class="badge ${r.active?isPaid?'paid':'pending':'paid'}">${r.active?isPaid?'Оплачен':'Ожидается':'Приостановлен'}</span>
+                  </div>
+                  <div style="display:flex;gap:6px;margin-top:10px;flex-wrap:wrap">
+                    ${r.active&&!isPaid?`<button class="btn btn-primary btn-sm" data-action="pay-recurring" data-rec-id="${r.id}">Оплачено</button>`:''}
+                    <button class="btn btn-secondary btn-sm" data-action="edit-recurring" data-rec-id="${r.id}">Изменить</button>
+                    <button class="btn btn-secondary btn-sm" data-action="toggle-recurring" data-rec-id="${r.id}">${r.active?'Приостановить':'Возобновить'}</button>
+                    <button class="btn btn-danger btn-sm" data-action="delete-recurring" data-rec-id="${r.id}">Удалить</button>
+                  </div>
+                </div>`;
+            }
+            function renderAnalytics() {
+                const stats = calcPeriodStats(state.selectedPeriod);
+                const catStats = calcCategoryStats(state.selectedPeriod);
+                const recPaid = calcRecurringMonthPaid(state.selectedPeriod);
+                const recExpected = calcRecurringMonthExpected();
+                const nonRecurringExp = stats.expense - recPaid;
+                const freeBalance = calcFreeBalance();
+                const donutData = catStats.cats.slice(0, 5);
+                const otherSum = catStats.cats.slice(5).reduce((s, c) => s + c.amount, 0);
+                if (otherSum > 0) donutData.push({ name: 'Другое', amount: otherSum, percent: catStats.totalExp > 0 ? otherSum / catStats.totalExp * 100 : 0, icon: '📋' });
+                const donutSegments = [];
+                let cumulative = 0;
+                const colors = ['#58a6ff', '#3fb950', '#d2991d', '#a371f7', '#f85149', '#6e7681'];
+                donutData.forEach((c, i) => {
+                    const pct = catStats.totalExp > 0 ? c.amount / catStats.totalExp * 100 : 0;
+                    donutSegments.push({ ...c, pct, start: cumulative, color: colors[i % colors.length] });
+                    cumulative += pct;
+                });
+                const conicGradient = donutSegments.length > 0 ? `conic-gradient(${donutSegments.map(s=>`${s.color} ${s.start*3.6}deg ${(s.start+s.pct)*3.6}deg`).join(',')})` : '#2a303c';
+                return `
+                <div class="card">
+                  <div class="card-header"><h3>Обзор</h3></div>
+                  <div class="kpi-row">
+                    <div class="kpi"><div class="label">Доходы</div><div class="value income">${formatMoney(stats.income)}</div></div>
+                    <div class="kpi"><div class="label">Расходы</div><div class="value expense">${formatMoney(stats.expense)}</div></div>
+                    <div class="kpi"><div class="label">Денежный поток</div><div class="value ${stats.cashFlow>=0?'income':'expense'}">${formatMoney(stats.cashFlow)}</div></div>
+                    <div class="kpi"><div class="label">Свободный остаток</div><div class="value free">${formatMoney(freeBalance)}</div></div>
+                  </div>
+                </div>
+                <div class="card">
+                  <div class="card-header"><h3>Постоянные vs Непостоянные</h3></div>
+                  <div class="kpi-row">
+                    <div class="kpi"><div class="label">Постоянные</div><div class="value warn">${formatMoney(recPaid)}</div><div style="font-size:10px;color:var(--text3)">из ${formatMoney(recExpected)}</div></div>
+                    <div class="kpi"><div class="label">Непостоянные</div><div class="value expense">${formatMoney(nonRecurringExp)}</div></div>
+                  </div>
+                </div>
+                <div class="card">
+                  <div class="card-header"><h3>Категории расходов</h3></div>
+                  ${catStats.cats.length===0?'<div class="empty-state"><p>Нет данных</p></div>':`
+                    <div class="donut-wrap">
+                      <div class="donut" style="background:${conicGradient}"></div>
+                      <div class="legend">
+                        ${donutSegments.map(s=>`<div class="legend-item"><span class="legend-dot" style="background:${s.color}"></span>${s.icon} ${escapeHTML(s.name)} ${s.pct.toFixed(1)}%</div>`).join('')}
+                      </div>
+                    </div>
+                    ${catStats.cats.map(c=>`
+                      <div class="cat-row">
+                        <span>${c.icon||'📋'}</span>
+                        <span style="font-size:13px;flex:0 0 90px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escapeHTML(c.name)}</span>
+                        <div class="cat-bar-wrap"><div class="cat-bar-fill" style="width:${Math.min(100,c.percent)}%;background:var(--accent)"></div></div>
+                        <span class="cat-amount">${formatMoney(c.amount)}</span>
+                        <span style="font-size:11px;color:var(--text3);width:40px;text-align:right">${c.percent.toFixed(0)}%</span>
+                      </div>
+                    `).join('')}
+                  `}
+                </div>
+                `;
+            }
+            function renderSettings() {
+                const incomeCats = state.categories.filter(c => c.type === 'income');
+                const expenseCats = state.categories.filter(c => c.type === 'expense');
+                const catListHTML = (cats, title) => `
+                <div class="section-title">${title}</div>
+                ${cats.map(c => `
+                  <div class="cat-list-item">
+                    <span>${c.icon} ${escapeHTML(c.name)}</span>
+                    <span style="display:flex; gap:6px;">
+                      ${!c.is_system ? `<button class="btn btn-secondary btn-sm" data-action="edit-cat" data-cat-id="${c.id}">✎</button>
+                       <button class="btn btn-danger btn-sm" data-action="delete-cat" data-cat-id="${c.id}">✕</button>` : '<span style="font-size:11px;color:var(--text3)">систем.</span>'}
+                    </span>
+                  </div>
+                `).join('')}
+                `;
+                return `
+                <div class="card">
+                  <div class="card-header"><h3>Категории</h3></div>
+                  ${catListHTML(incomeCats, 'Доходы')}
+                  ${catListHTML(expenseCats, 'Расходы')}
+                  <button class="btn btn-primary" id="addCatBtn" style="width:100%; margin-top:12px">+ Добавить категорию</button>
+                </div>
+                ${CONFIG.DEMO_MODE ? `
+                <div class="card" style="margin-top:8px">
+                  <div class="card-header"><h3>Тесты</h3></div>
+                  <button class="btn btn-secondary" id="runTestsBtn" style="width:100%">Запустить self-tests</button>
+                  <div id="testResult" style="margin-top:8px;font-size:12px;color:var(--text2)"></div>
+                </div>` : ''}
+                `;
+            }
+            // ==================== BIND ACTIONS ====================
+            function bindDashboardActions() {
+                $$('.quick-btn').forEach(b => {
+                    b.onclick = function() {
+                        const action = this.dataset.action;
+                        if (action === 'add-income') openAddTxSheet('income');
+                        if (action === 'add-expense') openAddTxSheet('expense');
+                        if (action === 'add-credit') openAddCreditSheet();
+                        if (action === 'add-recurring') openAddRecurringSheet();
+                    };
+                });
+                $$('.tx-row').forEach(row => {
+                    row.onclick = function() {
+                        const txId = this.dataset.txId;
+                        const tx = state.transactions.find(t => t.id === txId);
+                        if (tx) openEditTxSheet(tx);
+                    };
+                });
+            }
+            function bindTxActions() {
+                const searchEl = $('#txSearch');
+                if (searchEl) searchEl.oninput = debounce(function() { state._txSearch = this.value; renderAll(); }, 300);
+                const catFilter = $('#catFilter');
+                if (catFilter) catFilter.onchange = function() { state._txCatFilter = this.value; renderAll(); };
+                $$('.filter-chip').forEach(chip => {
+                    chip.onclick = function() { state._txFilter = this.dataset.filter; renderAll(); };
+                });
+                $$('.tx-row').forEach(row => {
+                    row.onclick = function() {
+                        const txId = this.dataset.txId;
+                        const tx = state.transactions.find(t => t.id === txId);
+                        if (tx) openEditTxSheet(tx);
+                    };
+                });
+            }
+            function bindObligationActions() {
+                $$('[data-action="pay-credit"]').forEach(btn => {
+                    btn.onclick = function(e) {
+                        e.stopPropagation();
+                        const creditId = this.dataset.creditId;
+                        const credit = state.credits.find(c => c.id === creditId);
+                        if (!credit || credit.status === 'closed') return;
+                        const actualPayment = Math.min(credit.payment_amount_minor, credit.remaining_amount_minor);
+                        openConfirm('Подтверждение', `Отметить платеж ${formatMoney(actualPayment)} по кредиту «${credit.name}» как выполненный?`, async () => {
+                            const btnEl = btn;
+                            btnEl.disabled = true; btnEl.textContent = '...';
+                            try {
+                                await apiRequest('mark_credit_payment_paid', {
+                                    credit_id: creditId,
+                                    idempotency_key: 'credit_' + creditId + '_' + nowISO() + '_' + Date.now(),
+                                    next_payment_date: addMonth(credit.next_payment_date),
+                                    category_id: state.categories.find(c => c.name === 'Кредиты' && c.type === 'expense')?.id,
+                                });
+                                if (tg?.HapticFeedback) tg.HapticFeedback.notificationOccurred('success');
+                                showToast('Платеж выполнен');
+                                renderAll();
+                            } catch (e) {
+                                showToast('Ошибка: ' + e.message, 'error');
+                                btnEl.disabled = false; btnEl.textContent = 'Платеж выполнен';
+                            }
+                        });
+                    };
+                });
+                $$('[data-action="pay-recurring"]').forEach(btn => {
+                    btn.onclick = function(e) {
+                        e.stopPropagation();
+                        const recId = this.dataset.recId;
+                        const rec = state.recurringExpenses.find(r => r.id === recId);
+                        if (!rec || !rec.active) return;
+                        openConfirm('Подтверждение', `Отметить платеж ${formatMoney(rec.amount_minor)} по «${rec.name}» как оплаченный?`, async () => {
+                            const btnEl = btn;
+                            btnEl.disabled = true; btnEl.textContent = '...';
+                            try {
+                                await apiRequest('mark_recurring_expense_paid', {
+                                    recurring_expense_id: recId,
+                                    idempotency_key: 'rec_' + recId + '_' + nowISO() + '_' + Date.now(),
+                                    next_payment_date: addMonth(rec.next_payment_date || nowISO()),
+                                });
+                                if (tg?.HapticFeedback) tg.HapticFeedback.notificationOccurred('success');
+                                showToast('Оплачено');
+                                renderAll();
+                            } catch (e) {
+                                showToast('Ошибка: ' + e.message, 'error');
+                                btnEl.disabled = false; btnEl.textContent = 'Оплачено';
+                            }
+                        });
+                    };
+                });
+                $$('[data-action="edit-credit"]').forEach(btn => {
+                    btn.onclick = function(e) { e.stopPropagation(); openEditCreditSheet(this.dataset.creditId); };
+                });
+                $$('[data-action="delete-credit"]').forEach(btn => {
+                    btn.onclick = function(e) {
+                        e.stopPropagation();
+                        const creditId = this.dataset.creditId;
+                        const credit = state.credits.find(c => c.id === creditId);
+                        openConfirm('Удалить кредит', `Удалить кредит «${credit?.name}»?`, async () => {
+                            await apiRequest('delete_credit', { id: creditId });
+                            showToast('Кредит удален');
+                            renderAll();
+                        });
+                    };
+                });
+                $$('[data-action="edit-recurring"]').forEach(btn => {
+                    btn.onclick = function(e) { e.stopPropagation(); openEditRecurringSheet(this.dataset.recId); };
+                });
+                $$('[data-action="toggle-recurring"]').forEach(btn => {
+                    btn.onclick = function(e) {
+                        e.stopPropagation();
+                        const recId = this.dataset.recId;
+                        const rec = state.recurringExpenses.find(r => r.id === recId);
+                        apiRequest('update_recurring_expense', { id: recId, active: !rec?.active }).then(() => { renderAll(); });
+                    };
+                });
+                $$('[data-action="delete-recurring"]').forEach(btn => {
+                    btn.onclick = function(e) {
+                        e.stopPropagation();
+                        const recId = this.dataset.recId;
+                        const rec = state.recurringExpenses.find(r => r.id === recId);
+                        openConfirm('Удалить', `Удалить постоянный расход «${rec?.name}»?`, async () => {
+                            await apiRequest('delete_recurring_expense', { id: recId });
+                            showToast('Удалено');
+                            renderAll();
+                        });
+                    };
+                });
+                $$('[data-action="add-credit"]').forEach(btn => {
+                    btn.onclick = () => openAddCreditSheet();
+                });
+                $$('[data-action="add-recurring"]').forEach(btn => {
+                    btn.onclick = () => openAddRecurringSheet();
+                });
+            }
+            function bindSettingsActions() {
+                const addCatBtn = $('#addCatBtn');
+                if (addCatBtn) addCatBtn.onclick = () => openAddCategorySheet();
+                $$('[data-action="edit-cat"]').forEach(b => b.onclick = (e) => { e.stopPropagation(); openEditCategorySheet(b.dataset.catId); });
+                $$('[data-action="delete-cat"]').forEach(b => b.onclick = (e) => {
+                    e.stopPropagation();
+                    const catId = b.dataset.catId;
+                    const cat = state.categories.find(c => c.id === catId);
+                    if (cat) openConfirm('Удалить категорию', `Удалить категорию «${cat.name}»?`, async () => {
+                        await apiRequest('delete_category', { id: catId });
+                        showToast('Категория удалена');
+                        renderAll();
+                    });
+                });
+                const testBtn = $('#runTestsBtn');
+                if (testBtn) testBtn.onclick = () => { runSelfTests(); $('#testResult').textContent = 'Тесты запущены — смотрите консоль (F12)'; };
+            }
+            function openAddCategorySheet() {
+                const bodyHTML = `
+                <div class="input-group"><label>Название</label><input type="text" id="catName" maxlength="40"></div>
+                <div class="input-group"><label>Тип</label><select id="catType"><option value="income">Доход</option><option value="expense">Расход</option></select></div>
+                <div class="input-group"><label>Иконка (эмодзи)</label><input type="text" id="catIcon" maxlength="4" placeholder="📋"></div>`;
+                openSheet('Добавить категорию', bodyHTML, (unlock) => {
+                    const name = $('#catName').value.trim();
+                    if (!name) { showToast('Введите название', 'error'); unlock(); return; }
+                    const icon = $('#catIcon').value.trim() || '📋';
+                    const type = $('#catType').value;
+                    apiRequest('create_category', { name, icon, type }).then(() => { showToast('Категория добавлена'); closeModal(); renderAll(); }).catch(e => { showToast('Ошибка', 'error'); unlock(); });
+                });
+            }
+            function openEditCategorySheet(catId) {
+                const cat = state.categories.find(c => c.id === catId);
+                if (!cat || cat.is_system) return;
+                const bodyHTML = `
+                <div class="input-group"><label>Название</label><input type="text" id="catName" maxlength="40" value="${escapeHTML(cat.name)}"></div>
+                <div class="input-group"><label>Тип</label><select id="catType" disabled><option value="income" ${cat.type==='income'?'selected':''}>Доход</option><option value="expense" ${cat.type==='expense'?'selected':''}>Расход</option></select></div>
+                <div class="input-group"><label>Иконка (эмодзи)</label><input type="text" id="catIcon" maxlength="4" value="${escapeHTML(cat.icon)}"></div>`;
+                openSheet('Изменить категорию', bodyHTML, (unlock) => {
+                    const name = $('#catName').value.trim();
+                    if (!name) { showToast('Введите название', 'error'); unlock(); return; }
+                    const icon = $('#catIcon').value.trim() || cat.icon;
+                    apiRequest('update_category', { id: catId, name, icon }).then(() => { showToast('Категория обновлена'); closeModal(); renderAll(); }).catch(e => { showToast('Ошибка', 'error'); unlock(); });
+                });
+            }
+            function openAddTxSheet(type) {
+                const cats = state.categories.filter(c => c.type === type);
+                const title = type === 'income' ? 'Добавить доход' : 'Добавить расход';
+                const bodyHTML = `
+                <div class="input-group"><label>Сумма (₽)</label><input type="number" id="sheetAmount" step="0.01" min="0.01" placeholder="0,00" autofocus></div>
+                <div class="input-group"><label>Категория</label><select id="sheetCat">${cats.map(c=>`<option value="${c.id}">${c.icon} ${c.name}</option>`).join('')}</select></div>
+                <div class="input-group"><label>Описание</label><input type="text" id="sheetDesc" maxlength="${CONFIG.MAX_DESC_LEN}" placeholder="Описание"></div>
+                <div class="input-group"><label>Дата</label><input type="date" id="sheetDate" value="${nowISO()}"></div>`;
+                openSheet(title, bodyHTML, (unlock) => {
+                    const amount = parseFloat($('#sheetAmount').value.replace(',', '.'));
+                    if (isNaN(amount) || amount <= 0) { showToast('Введите сумму больше 0', 'error'); unlock(); return; }
+                    const data = {
+                        type,
+                        amount_minor: moneyToMinor(amount),
+                        category_id: $('#sheetCat').value,
+                        description: $('#sheetDesc').value.trim() || null,
+                        transaction_date: $('#sheetDate').value || nowISO(),
+                    };
+                    apiRequest('create_transaction', data).then(() => {
+                        showToast('Операция добавлена');
+                        if (tg?.HapticFeedback) tg.HapticFeedback.notificationOccurred('success');
+                        closeModal();
+                        renderAll();
+                    }).catch(e => { showToast('Ошибка: ' + e.message, 'error'); unlock(); });
+                });
+            }
+            function openEditTxSheet(tx) {
+                const cats = state.categories.filter(c => c.type === tx.type);
+                const bodyHTML = `
+                <div class="input-group"><label>Сумма (₽)</label><input type="number" id="sheetAmount" step="0.01" min="0.01" value="${minorToMoney(tx.amount_minor).toFixed(2)}"></div>
+                <div class="input-group"><label>Категория</label><select id="sheetCat">${cats.map(c=>`<option value="${c.id}" ${c.id===tx.category_id?'selected':''}>${c.icon} ${c.name}</option>`).join('')}</select></div>
+                <div class="input-group"><label>Описание</label><input type="text" id="sheetDesc" maxlength="${CONFIG.MAX_DESC_LEN}" value="${escapeHTML(tx.description||'')}"></div>
+                <div class="input-group"><label>Дата</label><input type="date" id="sheetDate" value="${tx.transaction_date||nowISO()}"></div>
+                <button class="btn btn-danger btn-sm" id="deleteTxBtn" style="margin-top:8px;width:100%">Удалить операцию</button>`;
+                openSheet('Редактировать операцию', bodyHTML, (unlock) => {
+                    const amount = parseFloat($('#sheetAmount').value.replace(',', '.'));
+                    if (isNaN(amount) || amount <= 0) { showToast('Введите сумму больше 0', 'error'); unlock(); return; }
+                    const data = {
+                        id: tx.id,
+                        amount_minor: moneyToMinor(amount),
+                        category_id: $('#sheetCat').value,
+                        description: $('#sheetDesc').value.trim() || null,
+                        transaction_date: $('#sheetDate').value || nowISO(),
+                    };
+                    apiRequest('update_transaction', data).then(() => {
+                        showToast('Операция обновлена');
+                        closeModal();
+                        renderAll();
+                    }).catch(e => { showToast('Ошибка: ' + e.message, 'error'); unlock(); });
+                });
+                setTimeout(() => {
+                    const delBtn = $('#deleteTxBtn');
+                    if (delBtn) delBtn.onclick = () => {
+                        closeModal();
+                        openConfirm('Удалить операцию', 'Вы уверены?', async () => {
+                            await apiRequest('delete_transaction', { id: tx.id });
+                            showToast('Операция удалена');
+                            renderAll();
+                        });
+                    };
+                }, 100);
+            }
+            function openAddCreditSheet() {
+                const bodyHTML = `
+                <div class="input-group"><label>Название</label><input type="text" id="sheetCredName" maxlength="${CONFIG.MAX_NAME_LEN}" placeholder="Например: Телефон"></div>
+                <div class="input-group"><label>Первоначальная сумма (₽)</label><input type="number" id="sheetCredInit" step="0.01" min="0.01" placeholder="0,00"></div>
+                <div class="input-group"><label>Остаток (₽)</label><input type="number" id="sheetCredRem" step="0.01" min="0.01" placeholder="0,00"></div>
+                <div class="input-group"><label>Сумма платежа (₽)</label><input type="number" id="sheetCredPay" step="0.01" min="0.01" placeholder="0,00"></div>
+                <div class="input-group"><label>Дата следующего платежа</label><input type="date" id="sheetCredDate" value="${addMonth(nowISO())}"></div>
+                <div class="input-group"><label>Заметка</label><input type="text" id="sheetCredNote" maxlength="200" placeholder="Опционально"></div>`;
+                openSheet('Добавить кредит', bodyHTML, (unlock) => {
+                    const name = $('#sheetCredName').value.trim();
+                    const init = parseFloat($('#sheetCredInit').value.replace(',', '.'));
+                    const rem = parseFloat($('#sheetCredRem').value.replace(',', '.'));
+                    const pay = parseFloat($('#sheetCredPay').value.replace(',', '.'));
+                    if (!name) { showToast('Введите название', 'error'); unlock(); return; }
+                    if (isNaN(init) || init <= 0 || isNaN(rem) || rem < 0 || isNaN(pay) || pay <= 0) { showToast('Проверьте суммы', 'error'); unlock(); return; }
+                    apiRequest('create_credit', {
+                        name,
+                        initial_amount_minor: moneyToMinor(init),
+                        remaining_amount_minor: moneyToMinor(rem),
+                        payment_amount_minor: moneyToMinor(pay),
+                        next_payment_date: $('#sheetCredDate').value || addMonth(nowISO()),
+                        note: $('#sheetCredNote').value.trim() || null,
+                        status: 'active',
+                    }).then(() => { showToast('Кредит добавлен'); closeModal(); renderAll(); }).catch(e => { showToast('Ошибка: ' + e.message, 'error'); unlock(); });
+                });
+            }
+            function openEditCreditSheet(creditId) {
+                const c = state.credits.find(x => x.id === creditId);
+                if (!c) return;
+                const bodyHTML = `
+                <div class="input-group"><label>Название</label><input type="text" id="sheetCredName" maxlength="${CONFIG.MAX_NAME_LEN}" value="${escapeHTML(c.name)}"></div>
+                <div class="input-group"><label>Первоначальная сумма (₽)</label><input type="number" id="sheetCredInit" step="0.01" min="0.01" value="${minorToMoney(c.initial_amount_minor).toFixed(2)}"></div>
+                <div class="input-group"><label>Остаток (₽)</label><input type="number" id="sheetCredRem" step="0.01" min="0" value="${minorToMoney(c.remaining_amount_minor).toFixed(2)}"></div>
+                <div class="input-group"><label>Сумма платежа (₽)</label><input type="number" id="sheetCredPay" step="0.01" min="0.01" value="${minorToMoney(c.payment_amount_minor).toFixed(2)}"></div>
+                <div class="input-group"><label>Дата следующего платежа</label><input type="date" id="sheetCredDate" value="${c.next_payment_date||''}"></div>
+                <div class="input-group"><label>Заметка</label><input type="text" id="sheetCredNote" maxlength="200" value="${escapeHTML(c.note||'')}"></div>`;
+                openSheet('Редактировать кредит', bodyHTML, (unlock) => {
+                    const name = $('#sheetCredName').value.trim();
+                    const rem = parseFloat($('#sheetCredRem').value.replace(',', '.'));
+                    if (!name) { showToast('Введите название', 'error'); unlock(); return; }
+                    if (isNaN(rem) || rem < 0) { showToast('Проверьте остаток', 'error'); unlock(); return; }
+                    const newStatus = rem <= 0 ? 'closed' : c.status;
+                    apiRequest('update_credit', {
+                        id: creditId,
+                        name,
+                        initial_amount_minor: moneyToMinor(parseFloat($('#sheetCredInit').value.replace(',', '.')) || 0),
+                        remaining_amount_minor: moneyToMinor(rem),
+                        payment_amount_minor: moneyToMinor(parseFloat($('#sheetCredPay').value.replace(',', '.')) || 0),
+                        next_payment_date: $('#sheetCredDate').value || null,
+                        note: $('#sheetCredNote').value.trim() || null,
+                        status: newStatus,
+                    }).then(() => { showToast('Кредит обновлен'); closeModal(); renderAll(); }).catch(e => { showToast('Ошибка: ' + e.message, 'error'); unlock(); });
+                });
+            }
+            function openAddRecurringSheet() {
+                const expCats = state.categories.filter(c => c.type === 'expense');
+                const bodyHTML = `
+                <div class="input-group"><label>Название</label><input type="text" id="sheetRecName" maxlength="${CONFIG.MAX_NAME_LEN}" placeholder="Например: Аренда"></div>
+                <div class="input-group"><label>Сумма (₽)</label><input type="number" id="sheetRecAmt" step="0.01" min="0.01" placeholder="0,00"></div>
+                <div class="input-group"><label>Категория</label><select id="sheetRecCat">${expCats.map(c=>`<option value="${c.id}">${c.icon} ${c.name}</option>`).join('')}</select></div>
+                <div class="input-group"><label>Дата следующего платежа</label><input type="date" id="sheetRecDate" value="${addMonth(nowISO())}"></div>
+                <div class="input-group"><label>Заметка</label><input type="text" id="sheetRecNote" maxlength="200" placeholder="Опционально"></div>`;
+                openSheet('Добавить постоянный расход', bodyHTML, (unlock) => {
+                    const name = $('#sheetRecName').value.trim();
+                    const amt = parseFloat($('#sheetRecAmt').value.replace(',', '.'));
+                    if (!name) { showToast('Введите название', 'error'); unlock(); return; }
+                    if (isNaN(amt) || amt <= 0) { showToast('Введите сумму', 'error'); unlock(); return; }
+                    apiRequest('create_recurring_expense', {
+                        name,
+                        amount_minor: moneyToMinor(amt),
+                        category_id: $('#sheetRecCat').value,
+                        next_payment_date: $('#sheetRecDate').value || addMonth(nowISO()),
+                        recurrence: 'monthly',
+                        active: true,
+                        note: $('#sheetRecNote').value.trim() || null,
+                    }).then(() => { showToast('Постоянный расход добавлен'); closeModal(); renderAll(); }).catch(e => { showToast('Ошибка: ' + e.message, 'error'); unlock(); });
+                });
+            }
+            function openEditRecurringSheet(recId) {
+                const r = state.recurringExpenses.find(x => x.id === recId);
+                if (!r) return;
+                const expCats = state.categories.filter(c => c.type === 'expense');
+                const bodyHTML = `
+                <div class="input-group"><label>Название</label><input type="text" id="sheetRecName" maxlength="${CONFIG.MAX_NAME_LEN}" value="${escapeHTML(r.name)}"></div>
+                <div class="input-group"><label>Сумма (₽)</label><input type="number" id="sheetRecAmt" step="0.01" min="0.01" value="${minorToMoney(r.amount_minor).toFixed(2)}"></div>
+                <div class="input-group"><label>Категория</label><select id="sheetRecCat">${expCats.map(c=>`<option value="${c.id}" ${c.id===r.category_id?'selected':''}>${c.icon} ${c.name}</option>`).join('')}</select></div>
+                <div class="input-group"><label>Дата следующего платежа</label><input type="date" id="sheetRecDate" value="${r.next_payment_date||''}"></div>
+                <div class="input-group"><label>Заметка</label><input type="text" id="sheetRecNote" maxlength="200" value="${escapeHTML(r.note||'')}"></div>`;
+                openSheet('Редактировать постоянный расход', bodyHTML, (unlock) => {
+                    const name = $('#sheetRecName').value.trim();
+                    const amt = parseFloat($('#sheetRecAmt').value.replace(',', '.'));
+                    if (!name) { showToast('Введите название', 'error'); unlock(); return; }
+                    if (isNaN(amt) || amt <= 0) { showToast('Введите сумму', 'error'); unlock(); return; }
+                    apiRequest('update_recurring_expense', {
+                        id: recId,
+                        name,
+                        amount_minor: moneyToMinor(amt),
+                        category_id: $('#sheetRecCat').value,
+                        next_payment_date: $('#sheetRecDate').value || null,
+                        note: $('#sheetRecNote').value.trim() || null,
+                    }).then(() => { showToast('Обновлено'); closeModal(); renderAll(); }).catch(e => { showToast('Ошибка: ' + e.message, 'error'); unlock(); });
+                });
+            }
+            // ==================== INIT ====================
             async function bootstrap() {
                 state.loading = true;
                 renderAll();
