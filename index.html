@@ -619,6 +619,46 @@
                         state.transactions = state.transactions.filter(t => t.id !== payload.id);
                         saveDemoStorage();
                         return { deleted: true };
+                    case 'delete_credit_payment': {
+                        const txId = payload.transaction_id;
+                        const creditTx = state.transactions.find(t => t.id === txId && t.source_type === 'credit');
+                        if (!creditTx) throw new Error('Платеж по кредиту не найден');
+
+                        const paymentIndex = state.creditPayments.findIndex(p => p.transaction_id === txId);
+                        if (paymentIndex < 0) {
+                            state.transactions = state.transactions.filter(t => t.id !== txId);
+                            saveDemoStorage();
+                            return { deleted: true, orphan_deleted: true };
+                        }
+
+                        const payment = state.creditPayments[paymentIndex];
+                        const credit = state.credits.find(c => c.id === payment.credit_id || c.id === creditTx.source_id);
+                        if (!credit) throw new Error('Кредит не найден');
+
+                        const creditPayments = state.creditPayments.filter(p => p.credit_id === credit.id);
+                        const latestPayment = creditPayments[creditPayments.length - 1];
+                        if (!latestPayment || latestPayment.id !== payment.id) {
+                            throw new Error('Сначала удалите более новый платеж по этому кредиту');
+                        }
+
+                        credit.remaining_amount_minor = Math.min(
+                            credit.initial_amount_minor,
+                            (credit.remaining_amount_minor || 0) + (payment.amount_minor || creditTx.amount_minor || 0)
+                        );
+                        credit.status = 'active';
+
+                        const keyParts = String(payment.idempotency_key || '').split(':');
+                        const dueDate = payment.due_date || (keyParts.length >= 3 ? keyParts[keyParts.length - 1] : null);
+                        if (dueDate && /^\d{4}-\d{2}-\d{2}$/.test(dueDate)) {
+                            credit.next_payment_date = dueDate;
+                        }
+
+                        credit.updated_at = nowISO();
+                        state.creditPayments.splice(paymentIndex, 1);
+                        state.transactions = state.transactions.filter(t => t.id !== txId);
+                        saveDemoStorage();
+                        return { deleted: true, credit };
+                    }
                     case 'create_credit':
                         const cr = { ...payload, id: uid(), created_at: nowISO(), updated_at: nowISO() };
                         state.credits.push(cr);
@@ -648,7 +688,7 @@
                         credit.updated_at = nowISO();
                         const cpTx = { id: uid(), type: 'expense', amount_minor: actualPayment, category_id: state.categories.find(c => c.name === 'Кредиты' && c.type === 'expense')?.id || 'cat_exp_20', description: 'Платеж: ' + credit.name, transaction_date: nowISO(), created_at: nowISO(), source_type: 'credit', source_id: credit.id };
                         state.transactions.push(cpTx);
-                        const cp = { id: uid(), credit_id: credit.id, amount_minor: actualPayment, payment_date: nowISO(), transaction_id: cpTx.id, idempotency_key: creditIdemKey, created_at: nowISO() };
+                        const cp = { id: uid(), credit_id: credit.id, amount_minor: actualPayment, payment_date: nowISO(), due_date: creditDueDate, transaction_id: cpTx.id, idempotency_key: creditIdemKey, created_at: nowISO() };
                         state.creditPayments.push(cp);
                         saveDemoStorage();
                         return { credit, payment: cp, transaction: cpTx };
@@ -1014,7 +1054,7 @@
                   </div>
                   ${c.status==='active'?`
                   <div style="display:flex;gap:6px;margin-top:10px;flex-wrap:wrap">
-                    ${!isPaidThisPeriod ? `<button class="btn btn-primary btn-sm" data-action="pay-credit" data-credit-id="${escapeAttr(c.id)}">Платеж выполнен</button>` : ''}
+                    <button class="btn btn-primary btn-sm" data-action="pay-credit" data-credit-id="${escapeAttr(c.id)}">Платеж выполнен</button>
                     <button class="btn btn-secondary btn-sm" data-action="edit-credit" data-credit-id="${escapeAttr(c.id)}">Изменить</button>
                     <button class="btn btn-danger btn-sm" data-action="delete-credit" data-credit-id="${escapeAttr(c.id)}">Удалить</button>
                   </div>`:`<div style="margin-top:8px;color:var(--green);font-weight:600;font-size:13px">✅ Кредит погашен</div>`}
@@ -1145,7 +1185,12 @@
                     row.onclick = function() {
                         const txId = this.dataset.txId;
                         const tx = state.transactions.find(t => t.id === txId);
-                        if (tx && !tx.source_type) openEditTxSheet(tx);
+                        if (!tx) return;
+                        if (tx.source_type === 'credit') {
+                            openCreditPaymentSheet(tx);
+                        } else if (!tx.source_type) {
+                            openEditTxSheet(tx);
+                        }
                     };
                 });
             }
@@ -1161,7 +1206,12 @@
                     row.onclick = function() {
                         const txId = this.dataset.txId;
                         const tx = state.transactions.find(t => t.id === txId);
-                        if (tx && !tx.source_type) openEditTxSheet(tx);
+                        if (!tx) return;
+                        if (tx.source_type === 'credit') {
+                            openCreditPaymentSheet(tx);
+                        } else if (!tx.source_type) {
+                            openEditTxSheet(tx);
+                        }
                     };
                 });
             }
@@ -1173,7 +1223,10 @@
                         const credit = state.credits.find(c => c.id === creditId);
                         if (!credit || credit.status === 'closed') return;
                         const actualPayment = Math.min(credit.payment_amount_minor, credit.remaining_amount_minor);
-                        openConfirm('Подтверждение', `Отметить платеж ${formatMoney(actualPayment)} по кредиту «${credit.name}» как выполненный?`, async () => {
+                        openConfirm(
+                            'Платеж по кредиту',
+                            `Провести платеж ${formatMoney(actualPayment)} по кредиту «${credit.name}» за дату ${formatDateRu(credit.next_payment_date)}? Сумма сразу попадет в расходы, а следующий платеж сдвинется на месяц.`,
+                            async () => {
                             const btnEl = btn;
                             btnEl.disabled = true; btnEl.textContent = '...';
                             try {
@@ -1330,6 +1383,51 @@
                     }).catch(e => { showToast('Ошибка: ' + e.message, 'error'); unlock(); });
                 });
             }
+            function openCreditPaymentSheet(tx) {
+                const payment = state.creditPayments.find(p => p.transaction_id === tx.id);
+                const credit = state.credits.find(c => c.id === tx.source_id);
+                const creditName = credit?.name || (tx.description || 'кредит');
+
+                const bodyHTML = `
+                <div style="font-size:14px;color:var(--text2);line-height:1.6">
+                  <div><strong style="color:var(--text)">Платеж по кредиту</strong></div>
+                  <div style="margin-top:8px">Кредит: ${escapeHTML(creditName)}</div>
+                  <div>Сумма: ${formatMoney(tx.amount_minor)}</div>
+                  <div>Дата расхода: ${formatDateRu(tx.transaction_date)}</div>
+                  ${payment?.due_date ? `<div>Платеж за дату: ${formatDateRu(payment.due_date)}</div>` : ''}
+                  <div style="margin-top:10px;color:var(--text3)">При удалении связанного платежа сумма вернется в остаток кредита. Для сохранения правильного графика удалять платежи нужно с самого последнего.</div>
+                </div>
+                <button class="btn btn-danger btn-sm" id="deleteCreditPaymentBtn" style="margin-top:16px;width:100%">Удалить платеж</button>`;
+
+                openSheet('Платеж по кредиту', bodyHTML, () => {});
+
+                const saveBtn = $('#sheetSave');
+                if (saveBtn) saveBtn.style.display = 'none';
+
+                setTimeout(() => {
+                    const delBtn = $('#deleteCreditPaymentBtn');
+                    if (!delBtn) return;
+
+                    delBtn.onclick = () => {
+                        closeModal();
+                        openConfirm(
+                            'Удалить платеж',
+                            `Удалить платеж ${formatMoney(tx.amount_minor)} по кредиту «${creditName}»? Если он связан с кредитом, остаток кредита будет восстановлен.`,
+                            async () => {
+                                try {
+                                    await apiRequest('delete_credit_payment', { transaction_id: tx.id });
+                                    showToast('Платеж удален');
+                                    closeModal();
+                                    renderAll();
+                                } catch (e) {
+                                    showToast('Ошибка: ' + e.message, 'error');
+                                }
+                            }
+                        );
+                    };
+                }, 50);
+            }
+
             function openEditTxSheet(tx) {
                 const cats = state.categories.filter(c => c.type === tx.type);
                 const bodyHTML = `
