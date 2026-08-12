@@ -443,44 +443,142 @@
                 try { localStorage.setItem('balance_demo_v3', JSON.stringify(data)); } catch (e) {}
             }
             // ==================== API ====================
-            async function apiRequest(action, payload = {}) {
-                if (CONFIG.DEMO_MODE) return demoApiHandler(action, payload);
-                
-                // Проверка наличия initData
+            function idToString(value) {
+                return value === null || value === undefined ? value : String(value);
+            }
+
+            function normalizeServerData(data) {
+                if (!data) return data;
+
+                const normalized = { ...data };
+                if (normalized.user) {
+                    normalized.user = {
+                        ...normalized.user,
+                        id: idToString(normalized.user.id),
+                        telegram_id: idToString(normalized.user.telegram_id),
+                    };
+                }
+
+                normalized.transactions = (normalized.transactions || []).map(t => ({
+                    ...t,
+                    id: idToString(t.id),
+                    user_id: idToString(t.user_id),
+                    category_id: idToString(t.category_id),
+                    source_id: idToString(t.source_id),
+                }));
+
+                normalized.credits = (normalized.credits || []).map(c => ({
+                    ...c,
+                    id: idToString(c.id),
+                    user_id: idToString(c.user_id),
+                }));
+
+                normalized.creditPayments = (normalized.creditPayments || []).map(p => ({
+                    ...p,
+                    id: idToString(p.id),
+                    credit_id: idToString(p.credit_id),
+                    user_id: idToString(p.user_id),
+                    transaction_id: idToString(p.transaction_id),
+                }));
+
+                normalized.recurringExpenses = (normalized.recurringExpenses || []).map(r => ({
+                    ...r,
+                    id: idToString(r.id),
+                    user_id: idToString(r.user_id),
+                    category_id: idToString(r.category_id),
+                }));
+
+                normalized.recurringPayments = (normalized.recurringPayments || []).map(p => ({
+                    ...p,
+                    id: idToString(p.id),
+                    recurring_expense_id: idToString(p.recurring_expense_id),
+                    user_id: idToString(p.user_id),
+                    transaction_id: idToString(p.transaction_id),
+                }));
+
+                normalized.categories = (normalized.categories || []).map(c => ({
+                    ...c,
+                    id: idToString(c.id),
+                    user_id: idToString(c.user_id),
+                }));
+
+                return normalized;
+            }
+
+            function applyServerData(data) {
+                const normalized = normalizeServerData(data);
+                if (!normalized) return;
+
+                state.user = normalized.user || state.user;
+                state.settings = normalized.settings || { currency: 'RUB' };
+                state.transactions = normalized.transactions || [];
+                state.credits = normalized.credits || [];
+                state.creditPayments = normalized.creditPayments || [];
+                state.recurringExpenses = normalized.recurringExpenses || [];
+                state.recurringPayments = normalized.recurringPayments || [];
+                state.categories = normalized.categories || [];
+            }
+
+            async function apiFetch(action, payload = {}) {
                 if (!tg || !tg.initData) {
                     throw new Error('Telegram initData отсутствует. Откройте приложение через кнопку меню бота.');
                 }
-                
+
                 const headers = { 'Content-Type': 'application/json' };
-                // Передаём initData в теле запроса
                 const bodyPayload = {
-                    action: action,
+                    action,
                     payload: { ...payload, _initData: tg.initData }
                 };
+
                 const controller = new AbortController();
                 const timeout = setTimeout(() => controller.abort(), 15000);
+
                 try {
-                    const resp = await fetch(CONFIG.API_URL, { method: 'POST', headers, body: JSON.stringify(bodyPayload), signal: controller.signal });
-                    clearTimeout(timeout);
+                    const resp = await fetch(CONFIG.API_URL, {
+                        method: 'POST',
+                        headers,
+                        body: JSON.stringify(bodyPayload),
+                        signal: controller.signal
+                    });
+
                     let json;
                     try {
                         json = await resp.json();
                     } catch (e) {
                         throw new Error(`HTTP ${resp.status} – ответ не JSON`);
                     }
+
                     if (!resp.ok) {
                         const serverMsg = json?.error?.message || json?.message || `HTTP ${resp.status}`;
                         throw new Error(serverMsg);
                     }
+
                     if (json.ok === false) {
                         throw new Error(json.error?.message || 'API error');
                     }
+
                     return json.data;
                 } catch (e) {
-                    clearTimeout(timeout);
                     if (e.name === 'AbortError') throw new Error('Таймаут запроса');
                     throw e;
+                } finally {
+                    clearTimeout(timeout);
                 }
+            }
+
+            async function apiRequest(action, payload = {}) {
+                if (CONFIG.DEMO_MODE) return demoApiHandler(action, payload);
+
+                const result = await apiFetch(action, payload);
+
+                // После любого изменения сразу перечитываем данные из БД,
+                // чтобы интерфейс не показывал устаревшее состояние.
+                if (action !== 'bootstrap') {
+                    const freshData = await apiFetch('bootstrap');
+                    applyServerData(freshData);
+                }
+
+                return result;
             }
             function demoApiHandler(action, payload) {
                 switch (action) {
@@ -1356,14 +1454,7 @@
                         state.user = { id: 'demo_user', first_name: 'Алекс', username: 'alex_demo' };
                     } else {
                         const data = await apiRequest('bootstrap');
-                        state.user = data.user;
-                        state.settings = data.settings;
-                        state.transactions = data.transactions || [];
-                        state.credits = data.credits || [];
-                        state.creditPayments = data.creditPayments || [];
-                        state.recurringExpenses = data.recurringExpenses || [];
-                        state.recurringPayments = data.recurringPayments || [];
-                        state.categories = data.categories || [];
+                        applyServerData(data);
                     }
                     state.loading = false;
                     state.error = null;
