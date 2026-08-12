@@ -272,8 +272,20 @@
             function $$(sel) { return document.querySelectorAll(sel); }
             function escapeHTML(str) {
                 const div = document.createElement('div');
-                div.textContent = str || '';
+                div.textContent = str == null ? '' : String(str);
                 return div.innerHTML;
+            }
+            function escapeAttr(str) {
+                return String(str == null ? '' : str)
+                    .replace(/&/g, '&amp;')
+                    .replace(/</g, '&lt;')
+                    .replace(/>/g, '&gt;')
+                    .replace(/"/g, '&quot;')
+                    .replace(/'/g, '&#39;');
+            }
+            function categoryOptionHTML(c, selectedId = null) {
+                const selected = selectedId !== null && String(c.id) === String(selectedId) ? ' selected' : '';
+                return `<option value="${escapeAttr(c.id)}"${selected}>${escapeHTML(c.icon || '📋')} ${escapeHTML(c.name || '')}</option>`;
             }
             function uid() { return 'id_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8); }
             function nowISO() { return new Date().toISOString().split('T')[0]; }
@@ -624,16 +636,19 @@
                     case 'mark_credit_payment_paid':
                         const credit = state.credits.find(c => c.id === payload.credit_id);
                         if (!credit || credit.status === 'closed') throw new Error('Кредит не найден или закрыт');
-                        const existingPay = state.creditPayments.find(p => p.idempotency_key === payload.idempotency_key);
+                        const creditDueDate = payload.payment_due_date || credit.next_payment_date;
+                        const creditIdemKey = 'credit:' + credit.id + ':' + creditDueDate;
+                        const existingPay = state.creditPayments.find(p => p.idempotency_key === creditIdemKey);
                         if (existingPay) return existingPay;
+                        if (credit.next_payment_date !== creditDueDate) throw new Error('Дата платежа изменилась');
                         let actualPayment = Math.min(credit.payment_amount_minor, credit.remaining_amount_minor);
                         credit.remaining_amount_minor -= actualPayment;
                         if (credit.remaining_amount_minor <= 0) { credit.remaining_amount_minor = 0; credit.status = 'closed'; }
-                        credit.next_payment_date = payload.next_payment_date || addMonth(credit.next_payment_date);
+                        credit.next_payment_date = addMonth(creditDueDate);
                         credit.updated_at = nowISO();
-                        const cpTx = { id: uid(), type: 'expense', amount_minor: actualPayment, category_id: payload.category_id || state.categories.find(c => c.name === 'Кредиты' && c.type === 'expense')?.id || 'cat_exp_20', description: 'Платеж: ' + credit.name, transaction_date: nowISO(), created_at: nowISO(), source_type: 'credit', source_id: credit.id };
+                        const cpTx = { id: uid(), type: 'expense', amount_minor: actualPayment, category_id: state.categories.find(c => c.name === 'Кредиты' && c.type === 'expense')?.id || 'cat_exp_20', description: 'Платеж: ' + credit.name, transaction_date: nowISO(), created_at: nowISO(), source_type: 'credit', source_id: credit.id };
                         state.transactions.push(cpTx);
-                        const cp = { id: uid(), credit_id: credit.id, amount_minor: actualPayment, payment_date: nowISO(), transaction_id: cpTx.id, idempotency_key: payload.idempotency_key, created_at: nowISO() };
+                        const cp = { id: uid(), credit_id: credit.id, amount_minor: actualPayment, payment_date: nowISO(), transaction_id: cpTx.id, idempotency_key: creditIdemKey, created_at: nowISO() };
                         state.creditPayments.push(cp);
                         saveDemoStorage();
                         return { credit, payment: cp, transaction: cpTx };
@@ -654,13 +669,16 @@
                     case 'mark_recurring_expense_paid':
                         const rec = state.recurringExpenses.find(r => r.id === payload.recurring_expense_id);
                         if (!rec || !rec.active) throw new Error('Постоянный расход не найден или неактивен');
-                        const existRP = state.recurringPayments.find(p => p.idempotency_key === payload.idempotency_key);
+                        const recDueDate = payload.payment_due_date || rec.next_payment_date;
+                        const recIdemKey = 'recurring:' + rec.id + ':' + recDueDate;
+                        const existRP = state.recurringPayments.find(p => p.idempotency_key === recIdemKey);
                         if (existRP) return existRP;
+                        if (rec.next_payment_date !== recDueDate) throw new Error('Дата платежа изменилась');
                         const rpTx = { id: uid(), type: 'expense', amount_minor: rec.amount_minor, category_id: rec.category_id, description: rec.name + ' (постоянный)', transaction_date: nowISO(), created_at: nowISO(), source_type: 'recurring', source_id: rec.id };
                         state.transactions.push(rpTx);
-                        const rp = { id: uid(), recurring_expense_id: rec.id, due_date: rec.next_payment_date || nowISO(), paid_at: nowISO(), transaction_id: rpTx.id, idempotency_key: payload.idempotency_key, created_at: nowISO() };
+                        const rp = { id: uid(), recurring_expense_id: rec.id, due_date: recDueDate, paid_at: nowISO(), transaction_id: rpTx.id, idempotency_key: recIdemKey, created_at: nowISO() };
                         state.recurringPayments.push(rp);
-                        rec.next_payment_date = payload.next_payment_date || addMonth(rec.next_payment_date || nowISO());
+                        rec.next_payment_date = addMonth(recDueDate);
                         rec.updated_at = nowISO();
                         saveDemoStorage();
                         return { recurring_expense: rec, payment: rp, transaction: rpTx };
@@ -828,7 +846,17 @@
                 $('#greetingSub').textContent = CONFIG.DEMO_MODE ? 'Демо-режим' : (username ? '@' + username : '');
                 const avatarEl = $('#avatarEl');
                 avatarEl.textContent = name.charAt(0).toUpperCase();
-                if (isTelegram && tg.initDataUnsafe?.user?.photo_url) avatarEl.innerHTML = `<img src="${tg.initDataUnsafe.user.photo_url}" alt="">`;
+                if (isTelegram && tg.initDataUnsafe?.user?.photo_url) {
+                    try {
+                        const photoUrl = new URL(tg.initDataUnsafe.user.photo_url);
+                        if (photoUrl.protocol === 'https:') {
+                            const img = document.createElement('img');
+                            img.src = photoUrl.href;
+                            img.alt = '';
+                            avatarEl.replaceChildren(img);
+                        }
+                    } catch (e) {}
+                }
                 $('#demoBadge').style.display = CONFIG.DEMO_MODE ? 'block' : 'none';
                 const ps = $('#periodSelector');
                 ps.innerHTML = CONFIG.PERIODS.map(p => `<button class="${state.selectedPeriod===p.key?'active':''}" data-period="${p.key}">${p.label}</button>`).join('');
@@ -898,13 +926,13 @@
                   <button class="quick-btn recurring" data-action="add-recurring"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 1l4 4-4 4"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><path d="M7 23l-4-4 4-4"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>Постоянный</button>
                 </div>
                 ${upcomingObligations.length>0 ? `<div class="card"><div class="card-header"><h3>Ближайшие платежи</h3></div>${upcomingObligations.slice(0,4).map(o=>`<div class="obligation-row"><div class="obligation-info"><div class="name">${escapeHTML(o.name)}</div><div class="meta">${formatDateRu(o.date)} · ${o.daysLeft} дн. · <span class="badge ${o.statusClass}">${o.statusLabel}</span></div></div><div class="obligation-amount">${formatMoney(o.amount)}</div></div>`).join('')}</div>` : ''}
-                ${catStats.cats.length>0 ? `<div class="card"><div class="card-header"><h3>Топ категорий расходов</h3></div>${catStats.cats.slice(0,3).map(c=>`<div class="cat-row"><span>${c.icon||'📋'}</span><span style="font-size:13px;flex:0 0 80px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escapeHTML(c.name)}</span><div class="cat-bar-wrap"><div class="cat-bar-fill" style="width:${Math.min(100,c.percent)}%;background:var(--accent)"></div></div><span class="cat-amount">${formatMoney(c.amount)}</span><span style="font-size:11px;color:var(--text3);width:40px;text-align:right">${c.percent.toFixed(0)}%</span></div>`).join('')}</div>` : ''}
+                ${catStats.cats.length>0 ? `<div class="card"><div class="card-header"><h3>Топ категорий расходов</h3></div>${catStats.cats.slice(0,3).map(c=>`<div class="cat-row"><span>${escapeHTML(c.icon||'📋')}</span><span style="font-size:13px;flex:0 0 80px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escapeHTML(c.name)}</span><div class="cat-bar-wrap"><div class="cat-bar-fill" style="width:${Math.min(100,c.percent)}%;background:var(--accent)"></div></div><span class="cat-amount">${formatMoney(c.amount)}</span><span style="font-size:11px;color:var(--text3);width:40px;text-align:right">${c.percent.toFixed(0)}%</span></div>`).join('')}</div>` : ''}
                 ${recentTxs.length>0 ? `<div class="card"><div class="card-header"><h3>Последние операции</h3></div>${recentTxs.map(t=>renderTxRow(t)).join('')}</div>` : '<div class="empty-state"><p>Добавьте первую операцию</p></div>'}
                 `;
             }
             function renderTxRow(t) {
                 const cat = state.categories.find(c => c.id === t.category_id);
-                return `<div class="tx-row" data-tx-id="${t.id}"><div class="tx-icon ${t.type}">${cat?.icon||(t.type==='income'?'💰':'💸')}</div><div class="tx-info"><div class="desc">${escapeHTML(t.description||cat?.name||'')}</div><div class="date">${formatDateRu(t.transaction_date)}</div></div><div class="tx-amount ${t.type}">${t.type==='income'?'+':'-'}${formatMoney(t.amount_minor)}</div></div>`;
+                return `<div class="tx-row" data-tx-id="${escapeAttr(t.id)}"><div class="tx-icon ${t.type}">${escapeHTML(cat?.icon||(t.type==='income'?'💰':'💸'))}</div><div class="tx-info"><div class="desc">${escapeHTML(t.description||cat?.name||'')}</div><div class="date">${formatDateRu(t.transaction_date)}</div></div><div class="tx-amount ${t.type}">${t.type==='income'?'+':'-'}${formatMoney(t.amount_minor)}</div></div>`;
             }
             function getUpcomingObligations() {
                 const items = [];
@@ -943,7 +971,7 @@
                 const expCats = state.categories.filter(c => c.type === 'expense');
                 const incCats = state.categories.filter(c => c.type === 'income');
                 return `
-                <input class="search-input" id="txSearch" placeholder="Поиск по описанию..." value="${escapeHTML(searchQuery)}">
+                <input class="search-input" id="txSearch" placeholder="Поиск по описанию..." value="${escapeAttr(searchQuery)}">
                 <div class="filter-row">
                   <button class="filter-chip ${filterType==='all'?'active':''}" data-filter="all">Все</button>
                   <button class="filter-chip ${filterType==='income'?'active':''}" data-filter="income">Доходы</button>
@@ -951,8 +979,8 @@
                 </div>
                 <select class="search-input" id="catFilter" style="border-radius:16px;font-size:13px;">
                   <option value="all">Все категории</option>
-                  ${expCats.map(c=>`<option value="${c.id}" ${filterCat===c.id?'selected':''}>${c.icon} ${c.name}</option>`).join('')}
-                  ${incCats.map(c=>`<option value="${c.id}" ${filterCat===c.id?'selected':''}>${c.icon} ${c.name}</option>`).join('')}
+                  ${expCats.map(c=>categoryOptionHTML(c, filterCat)).join('')}
+                  ${incCats.map(c=>categoryOptionHTML(c, filterCat)).join('')}
                 </select>
                 ${txs.length===0?'<div class="empty-state"><p>Операций не найдено</p></div>':txs.map(t=>renderTxRow(t)).join('')}
                 `;
@@ -986,9 +1014,9 @@
                   </div>
                   ${c.status==='active'?`
                   <div style="display:flex;gap:6px;margin-top:10px;flex-wrap:wrap">
-                    <button class="btn btn-primary btn-sm" data-action="pay-credit" data-credit-id="${c.id}">Платеж выполнен</button>
-                    <button class="btn btn-secondary btn-sm" data-action="edit-credit" data-credit-id="${c.id}">Изменить</button>
-                    <button class="btn btn-danger btn-sm" data-action="delete-credit" data-credit-id="${c.id}">Удалить</button>
+                    ${!isPaidThisPeriod ? `<button class="btn btn-primary btn-sm" data-action="pay-credit" data-credit-id="${escapeAttr(c.id)}">Платеж выполнен</button>` : ''}
+                    <button class="btn btn-secondary btn-sm" data-action="edit-credit" data-credit-id="${escapeAttr(c.id)}">Изменить</button>
+                    <button class="btn btn-danger btn-sm" data-action="delete-credit" data-credit-id="${escapeAttr(c.id)}">Удалить</button>
                   </div>`:`<div style="margin-top:8px;color:var(--green);font-weight:600;font-size:13px">✅ Кредит погашен</div>`}
                 </div>`;
             }
@@ -1007,10 +1035,10 @@
                     <span class="badge ${r.active?isPaid?'paid':'pending':'paid'}">${r.active?isPaid?'Оплачен':'Ожидается':'Приостановлен'}</span>
                   </div>
                   <div style="display:flex;gap:6px;margin-top:10px;flex-wrap:wrap">
-                    ${r.active&&!isPaid?`<button class="btn btn-primary btn-sm" data-action="pay-recurring" data-rec-id="${r.id}">Оплачено</button>`:''}
-                    <button class="btn btn-secondary btn-sm" data-action="edit-recurring" data-rec-id="${r.id}">Изменить</button>
-                    <button class="btn btn-secondary btn-sm" data-action="toggle-recurring" data-rec-id="${r.id}">${r.active?'Приостановить':'Возобновить'}</button>
-                    <button class="btn btn-danger btn-sm" data-action="delete-recurring" data-rec-id="${r.id}">Удалить</button>
+                    ${r.active&&!isPaid?`<button class="btn btn-primary btn-sm" data-action="pay-recurring" data-rec-id="${escapeAttr(r.id)}">Оплачено</button>`:''}
+                    <button class="btn btn-secondary btn-sm" data-action="edit-recurring" data-rec-id="${escapeAttr(r.id)}">Изменить</button>
+                    <button class="btn btn-secondary btn-sm" data-action="toggle-recurring" data-rec-id="${escapeAttr(r.id)}">${r.active?'Приостановить':'Возобновить'}</button>
+                    <button class="btn btn-danger btn-sm" data-action="delete-recurring" data-rec-id="${escapeAttr(r.id)}">Удалить</button>
                   </div>
                 </div>`;
             }
@@ -1056,12 +1084,12 @@
                     <div class="donut-wrap">
                       <div class="donut" style="background:${conicGradient}"></div>
                       <div class="legend">
-                        ${donutSegments.map(s=>`<div class="legend-item"><span class="legend-dot" style="background:${s.color}"></span>${s.icon} ${escapeHTML(s.name)} ${s.pct.toFixed(1)}%</div>`).join('')}
+                        ${donutSegments.map(s=>`<div class="legend-item"><span class="legend-dot" style="background:${s.color}"></span>${escapeHTML(s.icon||'📋')} ${escapeHTML(s.name)} ${s.pct.toFixed(1)}%</div>`).join('')}
                       </div>
                     </div>
                     ${catStats.cats.map(c=>`
                       <div class="cat-row">
-                        <span>${c.icon||'📋'}</span>
+                        <span>${escapeHTML(c.icon||'📋')}</span>
                         <span style="font-size:13px;flex:0 0 90px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escapeHTML(c.name)}</span>
                         <div class="cat-bar-wrap"><div class="cat-bar-fill" style="width:${Math.min(100,c.percent)}%;background:var(--accent)"></div></div>
                         <span class="cat-amount">${formatMoney(c.amount)}</span>
@@ -1079,10 +1107,10 @@
                 <div class="section-title">${title}</div>
                 ${cats.map(c => `
                   <div class="cat-list-item">
-                    <span>${c.icon} ${escapeHTML(c.name)}</span>
+                    <span>${escapeHTML(c.icon||'📋')} ${escapeHTML(c.name)}</span>
                     <span style="display:flex; gap:6px;">
-                      ${!c.is_system ? `<button class="btn btn-secondary btn-sm" data-action="edit-cat" data-cat-id="${c.id}">✎</button>
-                       <button class="btn btn-danger btn-sm" data-action="delete-cat" data-cat-id="${c.id}">✕</button>` : '<span style="font-size:11px;color:var(--text3)">систем.</span>'}
+                      ${!c.is_system ? `<button class="btn btn-secondary btn-sm" data-action="edit-cat" data-cat-id="${escapeAttr(c.id)}">✎</button>
+                       <button class="btn btn-danger btn-sm" data-action="delete-cat" data-cat-id="${escapeAttr(c.id)}">✕</button>` : '<span style="font-size:11px;color:var(--text3)">систем.</span>'}
                     </span>
                   </div>
                 `).join('')}
@@ -1117,7 +1145,7 @@
                     row.onclick = function() {
                         const txId = this.dataset.txId;
                         const tx = state.transactions.find(t => t.id === txId);
-                        if (tx) openEditTxSheet(tx);
+                        if (tx && !tx.source_type) openEditTxSheet(tx);
                     };
                 });
             }
@@ -1133,7 +1161,7 @@
                     row.onclick = function() {
                         const txId = this.dataset.txId;
                         const tx = state.transactions.find(t => t.id === txId);
-                        if (tx) openEditTxSheet(tx);
+                        if (tx && !tx.source_type) openEditTxSheet(tx);
                     };
                 });
             }
@@ -1151,9 +1179,7 @@
                             try {
                                 await apiRequest('mark_credit_payment_paid', {
                                     credit_id: creditId,
-                                    idempotency_key: 'credit_' + creditId + '_' + nowISO() + '_' + Date.now(),
-                                    next_payment_date: addMonth(credit.next_payment_date),
-                                    category_id: state.categories.find(c => c.name === 'Кредиты' && c.type === 'expense')?.id,
+                                    payment_due_date: credit.next_payment_date,
                                 });
                                 if (tg?.HapticFeedback) tg.HapticFeedback.notificationOccurred('success');
                                 showToast('Платеж выполнен');
@@ -1177,8 +1203,7 @@
                             try {
                                 await apiRequest('mark_recurring_expense_paid', {
                                     recurring_expense_id: recId,
-                                    idempotency_key: 'rec_' + recId + '_' + nowISO() + '_' + Date.now(),
-                                    next_payment_date: addMonth(rec.next_payment_date || nowISO()),
+                                    payment_due_date: rec.next_payment_date,
                                 });
                                 if (tg?.HapticFeedback) tg.HapticFeedback.notificationOccurred('success');
                                 showToast('Оплачено');
@@ -1256,7 +1281,7 @@
                 const bodyHTML = `
                 <div class="input-group"><label>Название</label><input type="text" id="catName" maxlength="40"></div>
                 <div class="input-group"><label>Тип</label><select id="catType"><option value="income">Доход</option><option value="expense">Расход</option></select></div>
-                <div class="input-group"><label>Иконка (эмодзи)</label><input type="text" id="catIcon" maxlength="4" placeholder="📋"></div>`;
+                <div class="input-group"><label>Иконка (эмодзи)</label><input type="text" id="catIcon" maxlength="16" placeholder="📋"></div>`;
                 openSheet('Добавить категорию', bodyHTML, (unlock) => {
                     const name = $('#catName').value.trim();
                     if (!name) { showToast('Введите название', 'error'); unlock(); return; }
@@ -1269,9 +1294,9 @@
                 const cat = state.categories.find(c => c.id === catId);
                 if (!cat || cat.is_system) return;
                 const bodyHTML = `
-                <div class="input-group"><label>Название</label><input type="text" id="catName" maxlength="40" value="${escapeHTML(cat.name)}"></div>
+                <div class="input-group"><label>Название</label><input type="text" id="catName" maxlength="40" value="${escapeAttr(cat.name)}"></div>
                 <div class="input-group"><label>Тип</label><select id="catType" disabled><option value="income" ${cat.type==='income'?'selected':''}>Доход</option><option value="expense" ${cat.type==='expense'?'selected':''}>Расход</option></select></div>
-                <div class="input-group"><label>Иконка (эмодзи)</label><input type="text" id="catIcon" maxlength="4" value="${escapeHTML(cat.icon)}"></div>`;
+                <div class="input-group"><label>Иконка (эмодзи)</label><input type="text" id="catIcon" maxlength="16" value="${escapeAttr(cat.icon)}"></div>`;
                 openSheet('Изменить категорию', bodyHTML, (unlock) => {
                     const name = $('#catName').value.trim();
                     if (!name) { showToast('Введите название', 'error'); unlock(); return; }
@@ -1284,7 +1309,7 @@
                 const title = type === 'income' ? 'Добавить доход' : 'Добавить расход';
                 const bodyHTML = `
                 <div class="input-group"><label>Сумма (₽)</label><input type="number" id="sheetAmount" step="0.01" min="0.01" placeholder="0,00" autofocus></div>
-                <div class="input-group"><label>Категория</label><select id="sheetCat">${cats.map(c=>`<option value="${c.id}">${c.icon} ${c.name}</option>`).join('')}</select></div>
+                <div class="input-group"><label>Категория</label><select id="sheetCat">${cats.map(c=>categoryOptionHTML(c)).join('')}</select></div>
                 <div class="input-group"><label>Описание</label><input type="text" id="sheetDesc" maxlength="${CONFIG.MAX_DESC_LEN}" placeholder="Описание"></div>
                 <div class="input-group"><label>Дата</label><input type="date" id="sheetDate" value="${nowISO()}"></div>`;
                 openSheet(title, bodyHTML, (unlock) => {
@@ -1309,8 +1334,8 @@
                 const cats = state.categories.filter(c => c.type === tx.type);
                 const bodyHTML = `
                 <div class="input-group"><label>Сумма (₽)</label><input type="number" id="sheetAmount" step="0.01" min="0.01" value="${minorToMoney(tx.amount_minor).toFixed(2)}"></div>
-                <div class="input-group"><label>Категория</label><select id="sheetCat">${cats.map(c=>`<option value="${c.id}" ${c.id===tx.category_id?'selected':''}>${c.icon} ${c.name}</option>`).join('')}</select></div>
-                <div class="input-group"><label>Описание</label><input type="text" id="sheetDesc" maxlength="${CONFIG.MAX_DESC_LEN}" value="${escapeHTML(tx.description||'')}"></div>
+                <div class="input-group"><label>Категория</label><select id="sheetCat">${cats.map(c=>categoryOptionHTML(c, tx.category_id)).join('')}</select></div>
+                <div class="input-group"><label>Описание</label><input type="text" id="sheetDesc" maxlength="${CONFIG.MAX_DESC_LEN}" value="${escapeAttr(tx.description||'')}"></div>
                 <div class="input-group"><label>Дата</label><input type="date" id="sheetDate" value="${tx.transaction_date||nowISO()}"></div>
                 <button class="btn btn-danger btn-sm" id="deleteTxBtn" style="margin-top:8px;width:100%">Удалить операцию</button>`;
                 openSheet('Редактировать операцию', bodyHTML, (unlock) => {
@@ -1371,12 +1396,12 @@
                 const c = state.credits.find(x => x.id === creditId);
                 if (!c) return;
                 const bodyHTML = `
-                <div class="input-group"><label>Название</label><input type="text" id="sheetCredName" maxlength="${CONFIG.MAX_NAME_LEN}" value="${escapeHTML(c.name)}"></div>
+                <div class="input-group"><label>Название</label><input type="text" id="sheetCredName" maxlength="${CONFIG.MAX_NAME_LEN}" value="${escapeAttr(c.name)}"></div>
                 <div class="input-group"><label>Первоначальная сумма (₽)</label><input type="number" id="sheetCredInit" step="0.01" min="0.01" value="${minorToMoney(c.initial_amount_minor).toFixed(2)}"></div>
                 <div class="input-group"><label>Остаток (₽)</label><input type="number" id="sheetCredRem" step="0.01" min="0" value="${minorToMoney(c.remaining_amount_minor).toFixed(2)}"></div>
                 <div class="input-group"><label>Сумма платежа (₽)</label><input type="number" id="sheetCredPay" step="0.01" min="0.01" value="${minorToMoney(c.payment_amount_minor).toFixed(2)}"></div>
                 <div class="input-group"><label>Дата следующего платежа</label><input type="date" id="sheetCredDate" value="${c.next_payment_date||''}"></div>
-                <div class="input-group"><label>Заметка</label><input type="text" id="sheetCredNote" maxlength="200" value="${escapeHTML(c.note||'')}"></div>`;
+                <div class="input-group"><label>Заметка</label><input type="text" id="sheetCredNote" maxlength="200" value="${escapeAttr(c.note||'')}"></div>`;
                 openSheet('Редактировать кредит', bodyHTML, (unlock) => {
                     const name = $('#sheetCredName').value.trim();
                     const rem = parseFloat($('#sheetCredRem').value.replace(',', '.'));
@@ -1400,7 +1425,7 @@
                 const bodyHTML = `
                 <div class="input-group"><label>Название</label><input type="text" id="sheetRecName" maxlength="${CONFIG.MAX_NAME_LEN}" placeholder="Например: Аренда"></div>
                 <div class="input-group"><label>Сумма (₽)</label><input type="number" id="sheetRecAmt" step="0.01" min="0.01" placeholder="0,00"></div>
-                <div class="input-group"><label>Категория</label><select id="sheetRecCat">${expCats.map(c=>`<option value="${c.id}">${c.icon} ${c.name}</option>`).join('')}</select></div>
+                <div class="input-group"><label>Категория</label><select id="sheetRecCat">${expCats.map(c=>categoryOptionHTML(c)).join('')}</select></div>
                 <div class="input-group"><label>Дата следующего платежа</label><input type="date" id="sheetRecDate" value="${addMonth(nowISO())}"></div>
                 <div class="input-group"><label>Заметка</label><input type="text" id="sheetRecNote" maxlength="200" placeholder="Опционально"></div>`;
                 openSheet('Добавить постоянный расход', bodyHTML, (unlock) => {
@@ -1424,11 +1449,11 @@
                 if (!r) return;
                 const expCats = state.categories.filter(c => c.type === 'expense');
                 const bodyHTML = `
-                <div class="input-group"><label>Название</label><input type="text" id="sheetRecName" maxlength="${CONFIG.MAX_NAME_LEN}" value="${escapeHTML(r.name)}"></div>
+                <div class="input-group"><label>Название</label><input type="text" id="sheetRecName" maxlength="${CONFIG.MAX_NAME_LEN}" value="${escapeAttr(r.name)}"></div>
                 <div class="input-group"><label>Сумма (₽)</label><input type="number" id="sheetRecAmt" step="0.01" min="0.01" value="${minorToMoney(r.amount_minor).toFixed(2)}"></div>
-                <div class="input-group"><label>Категория</label><select id="sheetRecCat">${expCats.map(c=>`<option value="${c.id}" ${c.id===r.category_id?'selected':''}>${c.icon} ${c.name}</option>`).join('')}</select></div>
+                <div class="input-group"><label>Категория</label><select id="sheetRecCat">${expCats.map(c=>categoryOptionHTML(c, r.category_id)).join('')}</select></div>
                 <div class="input-group"><label>Дата следующего платежа</label><input type="date" id="sheetRecDate" value="${r.next_payment_date||''}"></div>
-                <div class="input-group"><label>Заметка</label><input type="text" id="sheetRecNote" maxlength="200" value="${escapeHTML(r.note||'')}"></div>`;
+                <div class="input-group"><label>Заметка</label><input type="text" id="sheetRecNote" maxlength="200" value="${escapeAttr(r.note||'')}"></div>`;
                 openSheet('Редактировать постоянный расход', bodyHTML, (unlock) => {
                     const name = $('#sheetRecName').value.trim();
                     const amt = parseFloat($('#sheetRecAmt').value.replace(',', '.'));
