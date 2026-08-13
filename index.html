@@ -753,6 +753,45 @@
                         state.creditPayments.push(cp);
                         saveDemoStorage();
                         return { credit, payment: cp, transaction: cpTx };
+                    case 'delete_recurring_payment': {
+                        const txId = payload.transaction_id;
+                        const recurringTx = state.transactions.find(t => t.id === txId && t.source_type === 'recurring');
+                        if (!recurringTx) throw new Error('Постоянный платеж не найден');
+
+                        const paymentIndex = state.recurringPayments.findIndex(p => p.transaction_id === txId);
+                        if (paymentIndex < 0) {
+                            // Старый осиротевший расход: удаляем только операцию.
+                            state.transactions = state.transactions.filter(t => t.id !== txId);
+                            saveDemoStorage();
+                            return { deleted: true, orphan_deleted: true };
+                        }
+
+                        const payment = state.recurringPayments[paymentIndex];
+                        const recurringId = payment.recurring_expense_id || recurringTx.source_id;
+                        const recurring = state.recurringExpenses.find(r => r.id === recurringId);
+                        const payments = state.recurringPayments.filter(p => p.recurring_expense_id === recurringId);
+                        const latestPayment = payments[payments.length - 1];
+
+                        if (!latestPayment || latestPayment.id !== payment.id) {
+                            throw new Error('Сначала удалите более новый постоянный платеж');
+                        }
+
+                        // Возвращаем график на дату удаляемого платежа.
+                        let dueDate = payment.due_date || null;
+                        if (!dueDate) {
+                            const match = String(payment.idempotency_key || '').match(/(\d{4}-\d{2}-\d{2})$/);
+                            dueDate = match ? match[1] : null;
+                        }
+                        if (recurring && dueDate) {
+                            recurring.next_payment_date = dueDate;
+                            recurring.updated_at = nowISO();
+                        }
+
+                        state.recurringPayments.splice(paymentIndex, 1);
+                        state.transactions = state.transactions.filter(t => t.id !== txId);
+                        saveDemoStorage();
+                        return { deleted: true, recurring_expense: recurring || null, restored_due_date: dueDate };
+                    }
                     case 'create_recurring_expense':
                         const re = { ...payload, id: uid(), created_at: nowISO(), updated_at: nowISO() };
                         state.recurringExpenses.push(re);
@@ -1316,6 +1355,8 @@
                         if (!tx) return;
                         if (tx.source_type === 'credit') {
                             openCreditPaymentSheet(tx);
+                        } else if (tx.source_type === 'recurring') {
+                            openRecurringPaymentSheet(tx);
                         } else if (!tx.source_type) {
                             openEditTxSheet(tx);
                         }
@@ -1337,6 +1378,8 @@
                         if (!tx) return;
                         if (tx.source_type === 'credit') {
                             openCreditPaymentSheet(tx);
+                        } else if (tx.source_type === 'recurring') {
+                            openRecurringPaymentSheet(tx);
                         } else if (!tx.source_type) {
                             openEditTxSheet(tx);
                         }
@@ -1545,6 +1588,51 @@
                                 try {
                                     await apiRequest('delete_credit_payment', { transaction_id: tx.id });
                                     showToast('Платеж удален');
+                                    closeModal();
+                                    renderAll();
+                                } catch (e) {
+                                    showToast('Ошибка: ' + e.message, 'error');
+                                }
+                            }
+                        );
+                    };
+                }, 50);
+            }
+
+            function openRecurringPaymentSheet(tx) {
+                const payment = state.recurringPayments.find(p => p.transaction_id === tx.id);
+                const recurring = state.recurringExpenses.find(r => r.id === tx.source_id);
+                const recurringName = recurring?.name || (tx.description || 'постоянный расход').replace(/\s*\(постоянный\)\s*$/i, '');
+
+                const bodyHTML = `
+                <div style="font-size:14px;color:var(--text2);line-height:1.6">
+                  <div><strong style="color:var(--text)">Постоянный платеж</strong></div>
+                  <div style="margin-top:8px">Расход: ${escapeHTML(recurringName)}</div>
+                  <div>Сумма: ${formatMoney(tx.amount_minor)}</div>
+                  <div>Дата расхода: ${formatDateRu(tx.transaction_date)}</div>
+                  ${payment?.due_date ? `<div>Платеж за дату: ${formatDateRu(payment.due_date)}</div>` : ''}
+                  <div style="margin-top:10px;color:var(--text3)">При удалении исчезнут и операция, и запись об оплате. Дата следующего платежа у постоянного расхода будет возвращена назад. Для правильного графика платежи удаляются с самого последнего.</div>
+                </div>
+                <button class="btn btn-danger btn-sm" id="deleteRecurringPaymentBtn" style="margin-top:16px;width:100%">Удалить платеж</button>`;
+
+                openSheet('Постоянный платеж', bodyHTML, () => {});
+
+                const saveBtn = $('#sheetSave');
+                if (saveBtn) saveBtn.style.display = 'none';
+
+                setTimeout(() => {
+                    const delBtn = $('#deleteRecurringPaymentBtn');
+                    if (!delBtn) return;
+
+                    delBtn.onclick = () => {
+                        closeModal();
+                        openConfirm(
+                            'Удалить постоянный платеж',
+                            `Удалить платеж ${formatMoney(tx.amount_minor)} по «${recurringName}»? Операция исчезнет из истории, а дата следующего платежа будет восстановлена.`,
+                            async () => {
+                                try {
+                                    await apiRequest('delete_recurring_payment', { transaction_id: tx.id });
+                                    showToast('Постоянный платеж удален');
                                     closeModal();
                                     renderAll();
                                 } catch (e) {
