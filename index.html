@@ -57,6 +57,10 @@
             background: var(--bg); position: sticky; top: 0; z-index: 100; border-bottom: 1px solid transparent; transition: border-color .2s;
         }
         header.scrolled { border-bottom-color: var(--border); }
+        header.no-period {
+            grid-template-areas: "avatar greeting";
+            row-gap: 0;
+        }
         .avatar {
             grid-area: avatar;
             width: 36px; height: 36px; border-radius: 50%; background: var(--accent2);
@@ -84,6 +88,8 @@
         .card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
         .card-header h3 { font-size: 13px; font-weight: 600; color: var(--text2); text-transform: uppercase; letter-spacing: .5px; }
         .balance-main { font-size: 38px; font-weight: 700; letter-spacing: -.5px; margin: 4px 0; }
+        .balance-main.income { color: var(--green); }
+        .balance-main.expense { color: var(--red); }
         .balance-sub { font-size: 13px; color: var(--text2); margin-top: 2px; }
         .kpi-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 12px; }
         .kpi { background: var(--surface2); border-radius: var(--radius-sm); padding: 12px; }
@@ -289,6 +295,12 @@
             }
             function uid() { return 'id_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8); }
             function nowISO() { return new Date().toISOString().split('T')[0]; }
+            function dateToISO(date) {
+                const y = date.getFullYear();
+                const m = String(date.getMonth() + 1).padStart(2, '0');
+                const d = String(date.getDate()).padStart(2, '0');
+                return `${y}-${m}-${d}`;
+            }
             function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; }
 
             // Склонение русского имени для заголовка "Баланс Антона".
@@ -360,6 +372,22 @@
                 if (parts.length !== 3) return dateStr;
                 return `${parts[2]}.${parts[1]}.${parts[0]}`;
             }
+            function parseLocalDate(dateStr) {
+                if (!dateStr) return null;
+                const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(dateStr));
+                if (!m) return new Date(dateStr);
+                return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+            }
+            function getPeriodMeta(periodKey) {
+                const now = new Date();
+                switch (periodKey) {
+                    case 'current': return { title: 'Текущий месяц', short: 'за месяц', months: 1 };
+                    case 'prev': return { title: 'Прошлый месяц', short: 'за прошлый месяц', months: 1 };
+                    case '3m': return { title: 'Последние 3 месяца', short: 'за 3 месяца', months: 3 };
+                    case 'year': return { title: 'Текущий год', short: 'за год', months: now.getMonth() + 1 };
+                    default: return { title: 'Текущий месяц', short: 'за месяц', months: 1 };
+                }
+            }
             function getPeriodRange(periodKey) {
                 const now = new Date();
                 const y = now.getFullYear();
@@ -372,14 +400,21 @@
                     default: return { start: new Date(y, m, 1), end: new Date(y, m + 1, 0) };
                 }
             }
+            function getDefaultTransactionDate() {
+                const today = parseLocalDate(nowISO());
+                const range = getPeriodRange(state.selectedPeriod);
+                if (today < range.start) return dateToISO(range.start);
+                if (today > range.end) return dateToISO(range.end);
+                return nowISO();
+            }
             function isInRange(dateStr, range) {
                 if (!dateStr) return false;
-                const d = new Date(dateStr);
+                const d = parseLocalDate(dateStr);
                 return d >= range.start && d <= range.end;
             }
             function daysUntil(dateStr) {
                 if (!dateStr) return null;
-                const d = new Date(dateStr);
+                const d = parseLocalDate(dateStr);
                 const now = new Date();
                 now.setHours(0, 0, 0, 0);
                 d.setHours(0, 0, 0, 0);
@@ -759,24 +794,32 @@
                 return { income, expense, cashFlow, txs, range };
             }
             function calcUnpaidObligations() {
-                const range = getPeriodRange(state.selectedPeriod);
+                // "Свободный остаток" имеет смысл только для текущего состояния.
+                // Берём следующий НЕОПЛАЧЕННЫЙ платёж каждого активного обязательства,
+                // который нужно закрыть до конца текущего месяца (включая просроченные).
+                const range = getPeriodRange('current');
                 const endOfPeriod = range.end;
                 let unpaid = 0;
+
                 state.credits.filter(c => c.status === 'active').forEach(c => {
-                    if (c.next_payment_date && new Date(c.next_payment_date) <= endOfPeriod) {
-                        const paid = state.creditPayments.filter(p => p.credit_id === c.id && isInRange(p.payment_date, range)).reduce((s, p) => s + (p.amount_minor || 0), 0);
-                        unpaid += Math.max(0, c.payment_amount_minor - paid);
+                    const due = parseLocalDate(c.next_payment_date);
+                    if (due && due <= endOfPeriod) {
+                        unpaid += Math.min(c.payment_amount_minor || 0, c.remaining_amount_minor || 0);
                     }
                 });
+
                 state.recurringExpenses.filter(r => r.active).forEach(r => {
-                    if (r.next_payment_date && new Date(r.next_payment_date) <= endOfPeriod) {
-                        const paid = state.recurringPayments.filter(p => p.recurring_expense_id === r.id && isInRange(p.paid_at || p.due_date, range)).reduce((s, p) => s + (p.amount_minor || 0), 0);
-                        unpaid += Math.max(0, r.amount_minor - paid);
+                    const due = parseLocalDate(r.next_payment_date);
+                    if (due && due <= endOfPeriod) {
+                        unpaid += r.amount_minor || 0;
                     }
                 });
+
                 return unpaid;
             }
-            function calcFreeBalance() { return calcBalance() - calcUnpaidObligations(); }
+            function calcFreeBalance() {
+                return calcBalance() - calcUnpaidObligations();
+            }
             function calcCategoryStats(periodKey) {
                 const { txs } = calcPeriodStats(periodKey);
                 const expenseTxs = txs.filter(t => t.type === 'expense');
@@ -899,9 +942,20 @@
                 }
                 $('#demoBadge').style.display = CONFIG.DEMO_MODE ? 'block' : 'none';
                 const ps = $('#periodSelector');
-                ps.innerHTML = CONFIG.PERIODS.map(p => `<button class="${state.selectedPeriod===p.key?'active':''}" data-period="${p.key}">${p.label}</button>`).join('');
-                ps.querySelectorAll('button').forEach(b => b.onclick = () => { state.selectedPeriod = b.dataset.period; renderAll(); });
+                const periodTabs = new Set(['dashboard', 'transactions', 'analytics']);
+                const showPeriod = periodTabs.has(state.currentTab);
+                ps.style.display = showPeriod ? 'flex' : 'none';
+                ps.innerHTML = showPeriod
+                    ? CONFIG.PERIODS.map(p => `<button class="${state.selectedPeriod===p.key?'active':''}" data-period="${p.key}">${p.label}</button>`).join('')
+                    : '';
+                if (showPeriod) {
+                    ps.querySelectorAll('button').forEach(b => b.onclick = () => {
+                        state.selectedPeriod = b.dataset.period;
+                        renderAll();
+                    });
+                }
                 const header = $('#appHeader');
+                header.classList.toggle('no-period', !showPeriod);
                 const main = $('#mainContent');
                 if (main.scrollTop > 10) header.classList.add('scrolled'); else header.classList.remove('scrolled');
             }
@@ -939,24 +993,44 @@
             }
             function renderDashboard() {
                 const stats = calcPeriodStats(state.selectedPeriod);
+                const periodMeta = getPeriodMeta(state.selectedPeriod);
+                const isCurrent = state.selectedPeriod === 'current';
                 const balance = calcBalance();
                 const freeBalance = calcFreeBalance();
                 const creditTotal = calcCreditTotal();
-                const recExpected = calcRecurringMonthExpected();
-                const recPaid = calcRecurringMonthPaid(state.selectedPeriod);
                 const catStats = calcCategoryStats(state.selectedPeriod);
-                const recentTxs = [...state.transactions].sort((a, b) => (b.transaction_date || '').localeCompare(a.transaction_date || '')).slice(0, 5);
-                const upcomingObligations = getUpcomingObligations();
+                const recentTxs = [...stats.txs]
+                    .sort((a, b) => (b.transaction_date || '').localeCompare(a.transaction_date || ''))
+                    .slice(0, 5);
+                const upcomingObligations = isCurrent ? getUpcomingObligations() : [];
+                const avgExpense = periodMeta.months > 0 ? Math.round(stats.expense / periodMeta.months) : stats.expense;
+
+                const mainTitle = isCurrent ? 'Баланс' : `Итог · ${periodMeta.title}`;
+                const mainValue = isCurrent ? balance : stats.cashFlow;
+                const mainSub = isCurrent
+                    ? `Свободно до конца месяца: <strong>${formatMoney(freeBalance)}</strong>`
+                    : (stats.txs.length
+                        ? `Доходы ${formatMoney(stats.income)} · расходы ${formatMoney(stats.expense)}`
+                        : 'За этот период операций не было');
+
+                const thirdKpi = isCurrent
+                    ? `<div class="kpi"><div class="label">Денежный поток</div><div class="value ${stats.cashFlow>=0?'income':'expense'}">${formatMoney(stats.cashFlow)}</div></div>`
+                    : `<div class="kpi"><div class="label">Средний расход / мес</div><div class="value expense">${formatMoney(avgExpense)}</div></div>`;
+
+                const fourthKpi = isCurrent
+                    ? `<div class="kpi"><div class="label">Кредиты</div><div class="value warn">${formatMoney(creditTotal)}</div></div>`
+                    : `<div class="kpi"><div class="label">Операций</div><div class="value">${stats.txs.length}</div></div>`;
+
                 return `
                 <div class="card">
-                  <div class="card-header"><h3>Баланс</h3></div>
-                  <div class="balance-main">${formatMoney(balance)}</div>
-                  <div class="balance-sub">Свободный остаток: <strong>${formatMoney(freeBalance)}</strong></div>
+                  <div class="card-header"><h3>${mainTitle}</h3></div>
+                  <div class="balance-main ${!isCurrent ? (mainValue >= 0 ? 'income' : 'expense') : ''}">${formatMoney(mainValue)}</div>
+                  <div class="balance-sub">${mainSub}</div>
                   <div class="kpi-row">
                     <div class="kpi"><div class="label">Доходы</div><div class="value income">${formatMoney(stats.income)}</div></div>
                     <div class="kpi"><div class="label">Расходы</div><div class="value expense">${formatMoney(stats.expense)}</div></div>
-                    <div class="kpi"><div class="label">Денежный поток</div><div class="value ${stats.cashFlow>=0?'income':'expense'}">${formatMoney(stats.cashFlow)}</div></div>
-                    <div class="kpi"><div class="label">Кредиты</div><div class="value warn">${formatMoney(creditTotal)}</div></div>
+                    ${thirdKpi}
+                    ${fourthKpi}
                   </div>
                 </div>
                 <div class="quick-actions">
@@ -966,8 +1040,8 @@
                   <button class="quick-btn recurring" data-action="add-recurring"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 1l4 4-4 4"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><path d="M7 23l-4-4 4-4"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>Постоянный</button>
                 </div>
                 ${upcomingObligations.length>0 ? `<div class="card"><div class="card-header"><h3>Ближайшие платежи</h3></div>${upcomingObligations.slice(0,4).map(o=>`<div class="obligation-row"><div class="obligation-info"><div class="name">${escapeHTML(o.name)}</div><div class="meta">${formatDateRu(o.date)} · ${o.daysLeft} дн. · <span class="badge ${o.statusClass}">${o.statusLabel}</span></div></div><div class="obligation-amount">${formatMoney(o.amount)}</div></div>`).join('')}</div>` : ''}
-                ${catStats.cats.length>0 ? `<div class="card"><div class="card-header"><h3>Топ категорий расходов</h3></div>${catStats.cats.slice(0,3).map(c=>`<div class="cat-row"><span>${escapeHTML(c.icon||'📋')}</span><span style="font-size:13px;flex:0 0 80px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escapeHTML(c.name)}</span><div class="cat-bar-wrap"><div class="cat-bar-fill" style="width:${Math.min(100,c.percent)}%;background:var(--accent)"></div></div><span class="cat-amount">${formatMoney(c.amount)}</span><span style="font-size:11px;color:var(--text3);width:40px;text-align:right">${c.percent.toFixed(0)}%</span></div>`).join('')}</div>` : ''}
-                ${recentTxs.length>0 ? `<div class="card"><div class="card-header"><h3>Последние операции</h3></div>${recentTxs.map(t=>renderTxRow(t)).join('')}</div>` : '<div class="empty-state"><p>Добавьте первую операцию</p></div>'}
+                ${catStats.cats.length>0 ? `<div class="card"><div class="card-header"><h3>Топ категорий расходов · ${periodMeta.short}</h3></div>${catStats.cats.slice(0,3).map(c=>`<div class="cat-row"><span>${escapeHTML(c.icon||'📋')}</span><span style="font-size:13px;flex:0 0 80px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escapeHTML(c.name)}</span><div class="cat-bar-wrap"><div class="cat-bar-fill" style="width:${Math.min(100,c.percent)}%;background:var(--accent)"></div></div><span class="cat-amount">${formatMoney(c.amount)}</span><span style="font-size:11px;color:var(--text3);width:40px;text-align:right">${c.percent.toFixed(0)}%</span></div>`).join('')}</div>` : ''}
+                ${recentTxs.length>0 ? `<div class="card"><div class="card-header"><h3>Операции · ${periodMeta.short}</h3></div>${recentTxs.map(t=>renderTxRow(t)).join('')}</div>` : '<div class="empty-state"><p>За выбранный период операций нет</p></div>'}
                 `;
             }
             function renderTxRow(t) {
@@ -975,26 +1049,42 @@
                 return `<div class="tx-row" data-tx-id="${escapeAttr(t.id)}"><div class="tx-icon ${t.type}">${escapeHTML(cat?.icon||(t.type==='income'?'💰':'💸'))}</div><div class="tx-info"><div class="desc">${escapeHTML(t.description||cat?.name||'')}</div><div class="date">${formatDateRu(t.transaction_date)}</div></div><div class="tx-amount ${t.type}">${t.type==='income'?'+':'-'}${formatMoney(t.amount_minor)}</div></div>`;
             }
             function getUpcomingObligations() {
+                // Эта подборка всегда про текущее состояние, а не про исторический фильтр.
                 const items = [];
-                const range = getPeriodRange(state.selectedPeriod);
+                const range = getPeriodRange('current');
+
                 state.credits.filter(c => c.status === 'active').forEach(c => {
-                    if (c.next_payment_date && new Date(c.next_payment_date) <= range.end) {
-                        const paid = state.creditPayments.filter(p => p.credit_id === c.id && isInRange(p.payment_date, range)).reduce((s, p) => s + (p.amount_minor || 0), 0);
-                        if (paid < c.payment_amount_minor) {
-                            const daysLeft = daysUntil(c.next_payment_date);
-                            items.push({ name: c.name, amount: c.payment_amount_minor - paid, date: c.next_payment_date, daysLeft: daysLeft !== null ? daysLeft : '?', type: 'credit', statusClass: daysLeft !== null && daysLeft < 0 ? 'overdue' : 'pending', statusLabel: daysLeft !== null && daysLeft < 0 ? 'Просрочен' : 'Ожидается' });
-                        }
+                    const due = parseLocalDate(c.next_payment_date);
+                    if (due && due <= range.end) {
+                        const daysLeft = daysUntil(c.next_payment_date);
+                        items.push({
+                            name: c.name,
+                            amount: Math.min(c.payment_amount_minor || 0, c.remaining_amount_minor || 0),
+                            date: c.next_payment_date,
+                            daysLeft: daysLeft !== null ? daysLeft : '?',
+                            type: 'credit',
+                            statusClass: daysLeft !== null && daysLeft < 0 ? 'overdue' : 'pending',
+                            statusLabel: daysLeft !== null && daysLeft < 0 ? 'Просрочен' : 'Ожидается'
+                        });
                     }
                 });
+
                 state.recurringExpenses.filter(r => r.active).forEach(r => {
-                    if (r.next_payment_date && new Date(r.next_payment_date) <= range.end) {
-                        const paid = state.recurringPayments.filter(p => p.recurring_expense_id === r.id && isInRange(p.paid_at || p.due_date, range)).reduce((s, p) => s + (p.amount_minor || 0), 0);
-                        if (paid < r.amount_minor) {
-                            const daysLeft = daysUntil(r.next_payment_date);
-                            items.push({ name: r.name, amount: r.amount_minor - paid, date: r.next_payment_date, daysLeft: daysLeft !== null ? daysLeft : '?', type: 'recurring', statusClass: daysLeft !== null && daysLeft < 0 ? 'overdue' : 'pending', statusLabel: daysLeft !== null && daysLeft < 0 ? 'Просрочен' : 'Ожидается' });
-                        }
+                    const due = parseLocalDate(r.next_payment_date);
+                    if (due && due <= range.end) {
+                        const daysLeft = daysUntil(r.next_payment_date);
+                        items.push({
+                            name: r.name,
+                            amount: r.amount_minor || 0,
+                            date: r.next_payment_date,
+                            daysLeft: daysLeft !== null ? daysLeft : '?',
+                            type: 'recurring',
+                            statusClass: daysLeft !== null && daysLeft < 0 ? 'overdue' : 'pending',
+                            statusLabel: daysLeft !== null && daysLeft < 0 ? 'Просрочен' : 'Ожидается'
+                        });
                     }
                 });
+
                 items.sort((a, b) => (a.date || '').localeCompare(b.date || ''));
                 return items;
             }
@@ -1002,7 +1092,8 @@
                 const filterType = state._txFilter || 'all';
                 const filterCat = state._txCatFilter || 'all';
                 const searchQuery = state._txSearch || '';
-                let txs = [...state.transactions];
+                const range = getPeriodRange(state.selectedPeriod);
+                let txs = state.transactions.filter(t => isInRange(t.transaction_date, range));
                 if (filterType === 'income') txs = txs.filter(t => t.type === 'income');
                 if (filterType === 'expense') txs = txs.filter(t => t.type === 'expense');
                 if (filterCat !== 'all') txs = txs.filter(t => t.category_id === filterCat);
@@ -1010,7 +1101,9 @@
                 txs.sort((a, b) => (b.transaction_date || '').localeCompare(a.transaction_date || ''));
                 const expCats = state.categories.filter(c => c.type === 'expense');
                 const incCats = state.categories.filter(c => c.type === 'income');
+                const periodMeta = getPeriodMeta(state.selectedPeriod);
                 return `
+                <div class="section-title">Операции · ${periodMeta.short}</div>
                 <input class="search-input" id="txSearch" placeholder="Поиск по описанию..." value="${escapeAttr(searchQuery)}">
                 <div class="filter-row">
                   <button class="filter-chip ${filterType==='all'?'active':''}" data-filter="all">Все</button>
@@ -1038,19 +1131,20 @@
                 `;
             }
             function renderCreditCard(c) {
-                const range = getPeriodRange(state.selectedPeriod);
-                const paidThisPeriod = state.creditPayments.filter(p => p.credit_id === c.id && isInRange(p.payment_date, range)).reduce((s, p) => s + (p.amount_minor || 0), 0);
-                const isPaidThisPeriod = c.status === 'active' && paidThisPeriod >= c.payment_amount_minor;
                 const daysLeft = daysUntil(c.next_payment_date);
+                const isOverdue = c.status === 'active' && daysLeft !== null && daysLeft < 0;
+                const badgeClass = c.status === 'closed' ? 'paid' : (isOverdue ? 'overdue' : 'pending');
+                const badgeLabel = c.status === 'closed' ? 'Погашен' : (isOverdue ? 'Просрочен' : 'Следующий платеж');
+
                 return `
                 <div class="card" style="margin-bottom:8px">
-                  <div style="display:flex;justify-content:space-between;align-items:start">
+                  <div style="display:flex;justify-content:space-between;align-items:start;gap:10px">
                     <div>
                       <strong>${escapeHTML(c.name)}</strong>
                       <div style="font-size:12px;color:var(--text3)">Остаток: ${formatMoney(c.remaining_amount_minor)} / ${formatMoney(c.initial_amount_minor)}</div>
-                      <div style="font-size:12px;color:var(--text3)">Платеж: ${formatMoney(c.payment_amount_minor)} · ${formatDateRu(c.next_payment_date)} · ${daysLeft!==null?daysLeft+' дн.':'—'}</div>
+                      <div style="font-size:12px;color:var(--text3)">Платеж: ${formatMoney(Math.min(c.payment_amount_minor || 0, c.remaining_amount_minor || 0))} · ${formatDateRu(c.next_payment_date)} · ${daysLeft!==null?daysLeft+' дн.':'—'}</div>
                     </div>
-                    <span class="badge ${c.status==='closed'?'paid':isPaidThisPeriod?'paid':'pending'}">${c.status==='closed'?'Погашен':isPaidThisPeriod?'Оплачен':'Ожидается'}</span>
+                    <span class="badge ${badgeClass}">${badgeLabel}</span>
                   </div>
                   ${c.status==='active'?`
                   <div style="display:flex;gap:6px;margin-top:10px;flex-wrap:wrap">
@@ -1061,21 +1155,22 @@
                 </div>`;
             }
             function renderRecurringRow(r) {
-                const range = getPeriodRange(state.selectedPeriod);
-                const paidThisPeriod = state.recurringPayments.filter(p => p.recurring_expense_id === r.id && isInRange(p.paid_at || p.due_date, range)).reduce((s, p) => s + (p.amount_minor || 0), 0);
-                const isPaid = paidThisPeriod >= r.amount_minor;
                 const daysLeft = daysUntil(r.next_payment_date);
+                const isOverdue = r.active && daysLeft !== null && daysLeft < 0;
+                const badgeClass = !r.active ? 'paid' : (isOverdue ? 'overdue' : 'pending');
+                const badgeLabel = !r.active ? 'Приостановлен' : (isOverdue ? 'Просрочен' : 'Следующий платеж');
+
                 return `
                 <div class="card" style="margin-bottom:8px">
-                  <div style="display:flex;justify-content:space-between;align-items:start">
+                  <div style="display:flex;justify-content:space-between;align-items:start;gap:10px">
                     <div>
                       <strong>${escapeHTML(r.name)}</strong>
                       <div style="font-size:12px;color:var(--text3)">${formatMoney(r.amount_minor)} · ${formatDateRu(r.next_payment_date)} · ${daysLeft!==null?daysLeft+' дн.':'—'}</div>
                     </div>
-                    <span class="badge ${r.active?isPaid?'paid':'pending':'paid'}">${r.active?isPaid?'Оплачен':'Ожидается':'Приостановлен'}</span>
+                    <span class="badge ${badgeClass}">${badgeLabel}</span>
                   </div>
                   <div style="display:flex;gap:6px;margin-top:10px;flex-wrap:wrap">
-                    ${r.active&&!isPaid?`<button class="btn btn-primary btn-sm" data-action="pay-recurring" data-rec-id="${escapeAttr(r.id)}">Оплачено</button>`:''}
+                    ${r.active?`<button class="btn btn-primary btn-sm" data-action="pay-recurring" data-rec-id="${escapeAttr(r.id)}">Оплачено</button>`:''}
                     <button class="btn btn-secondary btn-sm" data-action="edit-recurring" data-rec-id="${escapeAttr(r.id)}">Изменить</button>
                     <button class="btn btn-secondary btn-sm" data-action="toggle-recurring" data-rec-id="${escapeAttr(r.id)}">${r.active?'Приостановить':'Возобновить'}</button>
                     <button class="btn btn-danger btn-sm" data-action="delete-recurring" data-rec-id="${escapeAttr(r.id)}">Удалить</button>
@@ -1084,11 +1179,17 @@
             }
             function renderAnalytics() {
                 const stats = calcPeriodStats(state.selectedPeriod);
+                const periodMeta = getPeriodMeta(state.selectedPeriod);
                 const catStats = calcCategoryStats(state.selectedPeriod);
-                const recPaid = calcRecurringMonthPaid(state.selectedPeriod);
-                const recExpected = calcRecurringMonthExpected();
-                const nonRecurringExp = stats.expense - recPaid;
-                const freeBalance = calcFreeBalance();
+
+                // Для аналитики делим расходы по самим транзакциям.
+                // Так 3 месяца/год не сравниваются с "ожидаемой суммой одного месяца".
+                const recurringExp = stats.txs
+                    .filter(t => t.type === 'expense' && t.source_type === 'recurring')
+                    .reduce((s, t) => s + (t.amount_minor || 0), 0);
+                const nonRecurringExp = Math.max(0, stats.expense - recurringExp);
+                const avgExpense = periodMeta.months > 0 ? Math.round(stats.expense / periodMeta.months) : stats.expense;
+
                 const donutData = catStats.cats.slice(0, 5);
                 const otherSum = catStats.cats.slice(5).reduce((s, c) => s + c.amount, 0);
                 if (otherSum > 0) donutData.push({ name: 'Другое', amount: otherSum, percent: catStats.totalExp > 0 ? otherSum / catStats.totalExp * 100 : 0, icon: '📋' });
@@ -1101,26 +1202,27 @@
                     cumulative += pct;
                 });
                 const conicGradient = donutSegments.length > 0 ? `conic-gradient(${donutSegments.map(s=>`${s.color} ${s.start*3.6}deg ${(s.start+s.pct)*3.6}deg`).join(',')})` : '#2a303c';
+
                 return `
                 <div class="card">
-                  <div class="card-header"><h3>Обзор</h3></div>
+                  <div class="card-header"><h3>Обзор · ${periodMeta.title}</h3></div>
                   <div class="kpi-row">
                     <div class="kpi"><div class="label">Доходы</div><div class="value income">${formatMoney(stats.income)}</div></div>
                     <div class="kpi"><div class="label">Расходы</div><div class="value expense">${formatMoney(stats.expense)}</div></div>
                     <div class="kpi"><div class="label">Денежный поток</div><div class="value ${stats.cashFlow>=0?'income':'expense'}">${formatMoney(stats.cashFlow)}</div></div>
-                    <div class="kpi"><div class="label">Свободный остаток</div><div class="value free">${formatMoney(freeBalance)}</div></div>
+                    <div class="kpi"><div class="label">Средний расход / мес</div><div class="value">${formatMoney(avgExpense)}</div></div>
                   </div>
                 </div>
                 <div class="card">
                   <div class="card-header"><h3>Постоянные vs Непостоянные</h3></div>
                   <div class="kpi-row">
-                    <div class="kpi"><div class="label">Постоянные</div><div class="value warn">${formatMoney(recPaid)}</div><div style="font-size:10px;color:var(--text3)">из ${formatMoney(recExpected)}</div></div>
+                    <div class="kpi"><div class="label">Постоянные</div><div class="value warn">${formatMoney(recurringExp)}</div></div>
                     <div class="kpi"><div class="label">Непостоянные</div><div class="value expense">${formatMoney(nonRecurringExp)}</div></div>
                   </div>
                 </div>
                 <div class="card">
                   <div class="card-header"><h3>Категории расходов</h3></div>
-                  ${catStats.cats.length===0?'<div class="empty-state"><p>Нет данных</p></div>':`
+                  ${catStats.cats.length===0?'<div class="empty-state"><p>Нет данных за выбранный период</p></div>':`
                     <div class="donut-wrap">
                       <div class="donut" style="background:${conicGradient}"></div>
                       <div class="legend">
@@ -1364,7 +1466,7 @@
                 <div class="input-group"><label>Сумма (₽)</label><input type="number" id="sheetAmount" step="0.01" min="0.01" placeholder="0,00" autofocus></div>
                 <div class="input-group"><label>Категория</label><select id="sheetCat">${cats.map(c=>categoryOptionHTML(c)).join('')}</select></div>
                 <div class="input-group"><label>Описание</label><input type="text" id="sheetDesc" maxlength="${CONFIG.MAX_DESC_LEN}" placeholder="Описание"></div>
-                <div class="input-group"><label>Дата</label><input type="date" id="sheetDate" value="${nowISO()}"></div>`;
+                <div class="input-group"><label>Дата</label><input type="date" id="sheetDate" value="${getDefaultTransactionDate()}"></div>`;
                 openSheet(title, bodyHTML, (unlock) => {
                     const amount = parseFloat($('#sheetAmount').value.replace(',', '.'));
                     if (isNaN(amount) || amount <= 0) { showToast('Введите сумму больше 0', 'error'); unlock(); return; }
